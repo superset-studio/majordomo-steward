@@ -20,6 +20,7 @@ RUN apk add --no-cache ca-certificates tzdata
 COPY --from=builder /app/majordomo-steward /app/majordomo-steward
 COPY pricing.json /app/pricing.json
 COPY model_aliases.json /app/model_aliases.json
+COPY migrations/ /app/migrations/
 
 RUN adduser -D -u 1000 majordomo
 USER majordomo
