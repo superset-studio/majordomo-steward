@@ -54,10 +54,11 @@ func (s *PostgresStorage) FetchUnsyncedRecords(ctx context.Context, orgID uuid.U
 	for rows.Next() {
 		var r stewardclient.MetadataRecord
 		var rawMetaJSON, idxMetaJSON []byte
+		var providerAPIKeyHash, providerAPIKeyAlias sql.NullString
 
 		if err := rows.Scan(
 			&r.ID, &r.MajordomoAPIKeyID, &r.ProxyKeyID,
-			&r.ProviderAPIKeyHash, &r.ProviderAPIKeyAlias,
+			&providerAPIKeyHash, &providerAPIKeyAlias,
 			&r.Provider, &r.Model, &r.RequestPath, &r.RequestMethod,
 			&r.RequestedAt, &r.RespondedAt, &r.ResponseTimeMS,
 			&r.InputTokens, &r.OutputTokens, &r.CachedTokens, &r.CacheCreationTokens,
@@ -68,6 +69,8 @@ func (s *PostgresStorage) FetchUnsyncedRecords(ctx context.Context, orgID uuid.U
 		); err != nil {
 			return nil, fmt.Errorf("scan record: %w", err)
 		}
+		r.ProviderAPIKeyHash = providerAPIKeyHash.String
+		r.ProviderAPIKeyAlias = providerAPIKeyAlias.String
 
 		if len(rawMetaJSON) > 0 {
 			_ = json.Unmarshal(rawMetaJSON, &r.RawMetadata)
