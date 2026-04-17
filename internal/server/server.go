@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -30,6 +31,7 @@ type Server struct {
 // New builds and returns a fully configured Server. It wires the proxy handler
 // as a catch-all at "/*" and exposes health/readiness probes. Proxy-key and
 // Claude-session API routes are included when the relevant handlers are non-nil.
+// Admin routes are registered when both adminToken and adminHandler are provided.
 func New(
 	cfg *config.ServerConfig,
 	proxyHandler *proxy.Handler,
@@ -37,6 +39,8 @@ func New(
 	resolver *auth.Resolver,
 	apiHandler *api.Handler,
 	claudeHandler *api.ClaudeSessionHandler,
+	adminToken string,
+	adminHandler *api.AdminHandler,
 ) *Server {
 	s := &Server{
 		config:        cfg,
@@ -77,6 +81,17 @@ func New(
 		})
 	}
 
+	// Admin API — local org management (register, deregister, list orgs).
+	// Only mounted when a STEWARD_ADMIN_TOKEN is configured.
+	if adminToken != "" && adminHandler != nil {
+		router.Route("/admin", func(r chi.Router) {
+			r.Use(adminAuthMiddleware(adminToken))
+			r.Get("/orgs", adminHandler.HandleListOrgs)
+			r.Post("/orgs/register", adminHandler.HandleRegisterOrg)
+			r.Delete("/orgs/{orgID}", adminHandler.HandleDeregisterOrg)
+		})
+	}
+
 	// Catch-all: forward every other request to the LLM proxy.
 	router.Handle("/*", proxyHandler)
 
@@ -107,6 +122,24 @@ func (s *Server) ShutdownWithTimeout(timeout time.Duration) error {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	return s.Shutdown(ctx)
+}
+
+// adminAuthMiddleware rejects requests that don't carry the correct admin bearer token.
+func adminAuthMiddleware(token string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			auth := r.Header.Get("Authorization")
+			if auth == "" {
+				httputil.WriteJSONError(w, http.StatusUnauthorized, "admin token required")
+				return
+			}
+			if after, ok := strings.CutPrefix(auth, "Bearer "); !ok || strings.TrimSpace(after) != token {
+				httputil.WriteJSONError(w, http.StatusForbidden, "invalid admin token")
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 func healthHandler(w http.ResponseWriter, r *http.Request) {

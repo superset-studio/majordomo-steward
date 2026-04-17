@@ -161,10 +161,18 @@ func Build(ctx context.Context, cfg *config.Config) (*Server, error) {
 		slog.Info("managed org poller started", "butler_url", cfg.Managed.ButlerURL)
 	}
 
+	// ── Admin Handler (local org management API) ──────────────────────────────
+	var adminHandler *api.AdminHandler
+	if cfg.Secrets.AdminToken != "" && workerMgr != nil && proxySecretStore != nil {
+		adminHandler = api.NewAdminHandler(store, workerMgr, proxySecretStore)
+		slog.Info("admin API enabled")
+	}
+
 	// ── HTTP Server ───────────────────────────────────────────────────────────
 	apiHandler := api.NewHandler(store, proxySecretStore)
 	claudeHandler := api.NewClaudeSessionHandler(sessionMgr, store)
-	srv := server.New(&cfg.Server, proxyHandler, store, resolver, apiHandler, claudeHandler)
+	srv := server.New(&cfg.Server, proxyHandler, store, resolver, apiHandler, claudeHandler,
+		cfg.Secrets.AdminToken, adminHandler)
 
 	return &Server{
 		inner:         srv,

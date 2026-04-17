@@ -110,6 +110,24 @@ func (m *WorkerManager) StartOrg(orgID uuid.UUID, butlerURL, plaintextToken stri
 	return nil
 }
 
+// StopOrg stops the background workers for a single org and removes it from the
+// active set. It is a no-op if no workers are running for the given org.
+func (m *WorkerManager) StopOrg(ctx context.Context, orgID uuid.UUID) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	w, ok := m.active[orgID]
+	if !ok {
+		return
+	}
+
+	w.reporter.Stop()
+	w.keysync.Stop()
+	w.jobs.Stop()
+	delete(m.active, orgID)
+	slog.Info("stopped workers for org", "org_id", orgID)
+}
+
 // StopAll stops all active per-org workers. It blocks until all workers finish.
 func (m *WorkerManager) StopAll() {
 	m.mu.Lock()

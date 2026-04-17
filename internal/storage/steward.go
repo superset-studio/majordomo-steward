@@ -85,6 +85,20 @@ func (s *PostgresStorage) FetchUnsyncedRecords(ctx context.Context, orgID uuid.U
 	return records, rows.Err()
 }
 
+// CountUnsyncedRecords returns the number of request logs not yet synced to Butler
+// for the given org.
+func (s *PostgresStorage) CountUnsyncedRecords(ctx context.Context, orgID uuid.UUID) (int, error) {
+	var count int
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM llm_requests WHERE synced_to_butler = false AND org_id = $1`,
+		orgID,
+	).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("count unsynced records: %w", err)
+	}
+	return count, nil
+}
+
 // MarkSynced marks the given request IDs as synced to Butler.
 func (s *PostgresStorage) MarkSynced(ctx context.Context, ids []uuid.UUID) error {
 	if len(ids) == 0 {

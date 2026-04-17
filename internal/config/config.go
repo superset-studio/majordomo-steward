@@ -128,6 +128,7 @@ type MetadataConfig struct {
 
 type SecretsConfig struct {
 	EncryptionKey string `mapstructure:"encryption_key"`
+	AdminToken    string `mapstructure:"admin_token"`
 }
 
 func Load() (*Config, error) {
@@ -178,6 +179,7 @@ func bindEnv(v *viper.Viper) {
 	v.BindEnv("metadata.active_keys_cache_ttl", "METADATA_ACTIVE_KEYS_CACHE_TTL")
 
 	v.BindEnv("secrets.encryption_key", "ENCRYPTION_KEY")
+	v.BindEnv("secrets.admin_token", "STEWARD_ADMIN_TOKEN")
 
 	v.BindEnv("upstream.batch_interval", "BATCH_INTERVAL")
 	v.BindEnv("upstream.batch_max_size", "BATCH_MAX_SIZE")
