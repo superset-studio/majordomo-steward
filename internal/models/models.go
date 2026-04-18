@@ -251,6 +251,26 @@ type ClaudeRequestMetadata struct {
 	SystemPromptHash      string
 }
 
+// CloudStorageRecord represents a cloud storage configuration for a single owner
+// (user or org) as stored in the Steward's local cloud_storage_configs table.
+// Credential fields are stored encrypted using the Steward's own secret store.
+type CloudStorageRecord struct {
+	OwnerID   uuid.UUID `db:"owner_id"   json:"owner_id"`
+	OwnerType string    `db:"owner_type" json:"owner_type"` // "user" or "org"
+	Provider  string    `db:"provider"   json:"provider"`   // "s3" or "gcs"
+	// S3 fields
+	S3Bucket                      *string   `db:"s3_bucket"                        json:"s3_bucket,omitempty"`
+	S3Region                      *string   `db:"s3_region"                        json:"s3_region,omitempty"`
+	S3Endpoint                    *string   `db:"s3_endpoint"                      json:"s3_endpoint,omitempty"`
+	S3AccessKeyIDEncrypted        *string   `db:"s3_access_key_id_encrypted"       json:"-"`
+	S3SecretAccessKeyEncrypted    *string   `db:"s3_secret_access_key_encrypted"   json:"-"`
+	// GCS fields
+	GCSBucket                     *string   `db:"gcs_bucket"                       json:"gcs_bucket,omitempty"`
+	GCSProjectID                  *string   `db:"gcs_project_id"                   json:"gcs_project_id,omitempty"`
+	GCSCredentialsJSONEncrypted   *string   `db:"gcs_credentials_json_encrypted"   json:"-"`
+	SyncedAt                      time.Time `db:"synced_at"                        json:"synced_at"`
+}
+
 // Organization represents a team/organization for shared API key and reporting management.
 type Organization struct {
 	ID                          uuid.UUID `json:"id" db:"id"`

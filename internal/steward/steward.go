@@ -123,10 +123,8 @@ func Build(ctx context.Context, cfg *config.Config) (*Server, error) {
 		proxySecretStore, _ = secrets.NewAESStore(cfg.Secrets.EncryptionKey)
 	}
 
-	// Steward has no local users/orgs DB — pass nil; proxy handler is nil-safe
-	// and falls back to config-level S3 for body storage routing.
 	proxyHandler := proxy.NewHandler(
-		store, userBodyStorage, nil, nil,
+		store, userBodyStorage, store,
 		proxySecretStore, pricingSvc, resolver, proxyResolver, sessionMgr, cfg,
 	)
 

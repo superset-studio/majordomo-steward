@@ -14,11 +14,12 @@ import (
 	"github.com/superset-studio/majordomo-steward/internal/storage"
 )
 
-// orgWorkers holds the three background workers for a single registered org.
+// orgWorkers holds the background workers for a single registered org.
 type orgWorkers struct {
-	reporter *stewardclient.Reporter
-	keysync  *stewardclient.KeySyncer
-	jobs     *stewardclient.JobPoller
+	reporter    *stewardclient.Reporter
+	keysync     *stewardclient.KeySyncer
+	cloudSync   *stewardclient.CloudStorageSyncer
+	jobs        *stewardclient.JobPoller
 }
 
 // WorkerManager manages per-org background workers (reporter, key-syncer, job-poller).
@@ -96,14 +97,18 @@ func (m *WorkerManager) StartOrg(orgID uuid.UUID, butlerURL, plaintextToken stri
 	keysync := stewardclient.NewKeySyncer(orgCfg, m.store)
 	keysync.Start()
 
+	cloudSync := stewardclient.NewCloudStorageSyncer(orgCfg, m.store, m.secrets)
+	cloudSync.Start()
+
 	exec := &jobExecutor{proxy: m.proxy, store: m.store}
 	jobs := stewardclient.NewJobPoller(orgCfg, exec)
 	jobs.Start()
 
 	m.active[orgID] = &orgWorkers{
-		reporter: reporter,
-		keysync:  keysync,
-		jobs:     jobs,
+		reporter:  reporter,
+		keysync:   keysync,
+		cloudSync: cloudSync,
+		jobs:      jobs,
 	}
 
 	slog.Info("started workers for org", "org_id", orgID, "butler_url", butlerURL)
@@ -123,6 +128,7 @@ func (m *WorkerManager) StopOrg(ctx context.Context, orgID uuid.UUID) {
 
 	w.reporter.Stop()
 	w.keysync.Stop()
+	w.cloudSync.Stop()
 	w.jobs.Stop()
 	delete(m.active, orgID)
 	slog.Info("stopped workers for org", "org_id", orgID)
@@ -136,6 +142,7 @@ func (m *WorkerManager) StopAll() {
 	for orgID, w := range m.active {
 		w.reporter.Stop()
 		w.keysync.Stop()
+		w.cloudSync.Stop()
 		w.jobs.Stop()
 		slog.Info("stopped workers for org", "org_id", orgID)
 	}
