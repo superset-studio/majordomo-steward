@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math/rand"
 	"net/http"
 	"time"
 
@@ -66,6 +67,14 @@ func (jp *JobPoller) Stop() {
 
 func (jp *JobPoller) run() {
 	defer close(jp.doneCh)
+
+	// Spread concurrent org pollers across the interval to avoid thundering herd.
+	jitter := time.Duration(rand.Int63n(int64(jp.cfg.JobPollInterval)))
+	select {
+	case <-time.After(jitter):
+	case <-jp.stopCh:
+		return
+	}
 
 	ticker := time.NewTicker(jp.cfg.JobPollInterval)
 	defer ticker.Stop()
