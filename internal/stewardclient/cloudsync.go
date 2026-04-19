@@ -36,7 +36,7 @@ type cloudStorageConfigPayload struct {
 // CloudStorageSyncStore is the minimal storage interface required by
 // CloudStorageSyncer.
 type CloudStorageSyncStore interface {
-	ReplaceCloudStorageConfigs(ctx context.Context, records []models.CloudStorageRecord) error
+	UpsertCloudStorageConfigs(ctx context.Context, records []models.CloudStorageRecord) error
 }
 
 // CloudStorageSyncer polls Butler for the org's cloud storage configs and
@@ -111,7 +111,7 @@ func (cs *CloudStorageSyncer) sync() {
 		return
 	}
 
-	if err := cs.store.ReplaceCloudStorageConfigs(context.Background(), records); err != nil {
+	if err := cs.store.UpsertCloudStorageConfigs(context.Background(), records); err != nil {
 		slog.Warn("cloud storage sync store failed", "error", err)
 		return
 	}

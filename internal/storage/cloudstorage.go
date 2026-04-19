@@ -18,12 +18,10 @@ type CloudStorageConfigStore interface {
 	// or nil, nil if no config exists.
 	GetCloudStorageConfig(ctx context.Context, ownerID uuid.UUID) (*models.CloudStorageRecord, error)
 
-	// ReplaceCloudStorageConfigs replaces all cloud storage configs for the
-	// owners present in records inside a single transaction. Configs for any
-	// owner_id not in the new set are deleted (full-refresh semantics).
-	// ownerType scope: all existing records whose owner_id does NOT appear in
-	// the incoming set are deleted regardless of owner_type.
-	ReplaceCloudStorageConfigs(ctx context.Context, records []models.CloudStorageRecord) error
+	// UpsertCloudStorageConfigs upserts the given cloud storage configs into
+	// local storage. Records are added or updated; nothing is deleted.
+	// Deletions are handled by the event-driven sync redesign.
+	UpsertCloudStorageConfigs(ctx context.Context, records []models.CloudStorageRecord) error
 }
 
 // GetCloudStorageConfig returns the cloud storage config for the given owner,
@@ -55,48 +53,21 @@ func (s *PostgresStorage) GetCloudStorageConfig(ctx context.Context, ownerID uui
 	return &r, nil
 }
 
-// ReplaceCloudStorageConfigs atomically replaces the full set of cloud storage
-// configs. Any record whose owner_id is not present in the incoming slice is
-// deleted (handles removals). The entire operation runs inside one transaction.
-func (s *PostgresStorage) ReplaceCloudStorageConfigs(ctx context.Context, records []models.CloudStorageRecord) error {
+// UpsertCloudStorageConfigs upserts cloud storage configs into local storage.
+// Each record is inserted or updated by (owner_id, owner_type). Nothing is
+// deleted — removal is handled by the event-driven sync redesign.
+func (s *PostgresStorage) UpsertCloudStorageConfigs(ctx context.Context, records []models.CloudStorageRecord) error {
+	if len(records) == 0 {
+		return nil
+	}
+
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
 	}
 	defer tx.Rollback()
 
-	// Collect incoming owner IDs so we can delete stale records.
-	incoming := make([]uuid.UUID, len(records))
-	for i, r := range records {
-		incoming[i] = r.OwnerID
-	}
-
-	if len(incoming) == 0 {
-		// No configs at all — delete everything.
-		if _, err := tx.ExecContext(ctx, `DELETE FROM cloud_storage_configs`); err != nil {
-			return fmt.Errorf("delete all cloud storage configs: %w", err)
-		}
-		return tx.Commit()
-	}
-
-	// Delete records whose owner is no longer in the synced set.
-	// Build a parameterised NOT IN clause.
-	notInPlaceholders := make([]string, len(incoming))
-	args := make([]interface{}, len(incoming))
-	for i, id := range incoming {
-		notInPlaceholders[i] = fmt.Sprintf("$%d", i+1)
-		args[i] = id
-	}
-	deleteQ := fmt.Sprintf(
-		`DELETE FROM cloud_storage_configs WHERE owner_id NOT IN (%s)`,
-		joinStrings(notInPlaceholders, ","),
-	)
-	if _, err := tx.ExecContext(ctx, deleteQ, args...); err != nil {
-		return fmt.Errorf("delete stale cloud storage configs: %w", err)
-	}
-
-	// Upsert each record.
-	const upsertQ = `
+	const q = `
 		INSERT INTO cloud_storage_configs (
 			owner_id, owner_type, provider,
 			s3_bucket, s3_region, s3_endpoint,
@@ -118,7 +89,7 @@ func (s *PostgresStorage) ReplaceCloudStorageConfigs(ctx context.Context, record
 
 	now := time.Now()
 	for _, r := range records {
-		if _, err := tx.ExecContext(ctx, upsertQ,
+		if _, err := tx.ExecContext(ctx, q,
 			r.OwnerID, r.OwnerType, r.Provider,
 			r.S3Bucket, r.S3Region, r.S3Endpoint,
 			r.S3AccessKeyIDEncrypted, r.S3SecretAccessKeyEncrypted,
