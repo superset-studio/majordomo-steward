@@ -19,6 +19,7 @@ import (
 // Defined here to avoid a cross-repo import dependency.
 type MetadataRecord struct {
 	ID                  uuid.UUID              `json:"id"`
+	UserID              *uuid.UUID             `json:"user_id,omitempty"`
 	MajordomoAPIKeyID   *uuid.UUID             `json:"majordomo_api_key_id,omitempty"`
 	ProxyKeyID          *uuid.UUID             `json:"proxy_key_id,omitempty"`
 	ProviderAPIKeyHash  string                 `json:"provider_api_key_hash,omitempty"`

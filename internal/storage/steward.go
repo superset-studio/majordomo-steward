@@ -30,7 +30,7 @@ func (s *PostgresStorage) DB() *sql.DB {
 func (s *PostgresStorage) FetchUnsyncedRecords(ctx context.Context, orgID uuid.UUID, limit int) ([]stewardclient.MetadataRecord, error) {
 	const q = `
 		SELECT
-			id, majordomo_api_key_id, proxy_key_id,
+			id, user_id, majordomo_api_key_id, proxy_key_id,
 			provider_api_key_hash, provider_api_key_alias,
 			provider, model, request_path, request_method,
 			requested_at, responded_at, response_time_ms,
@@ -57,7 +57,7 @@ func (s *PostgresStorage) FetchUnsyncedRecords(ctx context.Context, orgID uuid.U
 		var providerAPIKeyHash, providerAPIKeyAlias sql.NullString
 
 		if err := rows.Scan(
-			&r.ID, &r.MajordomoAPIKeyID, &r.ProxyKeyID,
+			&r.ID, &r.UserID, &r.MajordomoAPIKeyID, &r.ProxyKeyID,
 			&providerAPIKeyHash, &providerAPIKeyAlias,
 			&r.Provider, &r.Model, &r.RequestPath, &r.RequestMethod,
 			&r.RequestedAt, &r.RespondedAt, &r.ResponseTimeMS,
@@ -137,16 +137,17 @@ func joinStrings(ss []string, sep string) string {
 func (s *PostgresStorage) UpsertAPIKeys(ctx context.Context, keys []stewardclient.APIKeyRecord) error {
 	const q = `
 		INSERT INTO api_keys (
-			id, key_hash, name, description, is_active, org_id,
+			id, key_hash, name, description, is_active, user_id, org_id,
 			created_at, revoked_at, updated_at
 		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10
 		)
 		ON CONFLICT (id) DO UPDATE SET
 			key_hash    = EXCLUDED.key_hash,
 			name        = EXCLUDED.name,
 			description = EXCLUDED.description,
 			is_active   = EXCLUDED.is_active,
+			user_id     = EXCLUDED.user_id,
 			org_id      = EXCLUDED.org_id,
 			revoked_at  = EXCLUDED.revoked_at,
 			updated_at  = EXCLUDED.updated_at`
@@ -154,7 +155,7 @@ func (s *PostgresStorage) UpsertAPIKeys(ctx context.Context, keys []stewardclien
 	for i := range keys {
 		k := &keys[i]
 		if _, err := s.db.ExecContext(ctx, q,
-			k.ID, k.KeyHash, k.Name, k.Description, k.IsActive, k.OrgID,
+			k.ID, k.KeyHash, k.Name, k.Description, k.IsActive, k.UserID, k.OrgID,
 			k.CreatedAt, k.RevokedAt, k.UpdatedAt,
 		); err != nil {
 			return fmt.Errorf("upsert api key %s: %w", k.ID, err)

@@ -19,6 +19,7 @@ type APIKeyRecord struct {
 	Name        string     `json:"name"`
 	Description *string    `json:"description,omitempty"`
 	IsActive    bool       `json:"is_active"`
+	UserID      *uuid.UUID `json:"user_id,omitempty"`
 	OrgID       *uuid.UUID `json:"org_id,omitempty"`
 	CreatedAt   time.Time  `json:"created_at"`
 	RevokedAt   *time.Time `json:"revoked_at,omitempty"`
