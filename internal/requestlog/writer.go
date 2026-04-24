@@ -1,94 +1,92 @@
-package storage
+// Package requestlog provides async writing of request logs to PostgreSQL.
+package requestlog
 
 import (
 	"context"
 	"encoding/json"
 	"log/slog"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
-	_ "github.com/lib/pq"
+
 	"github.com/superset-studio/majordomo-steward/internal/models"
+	"github.com/superset-studio/majordomo-steward/internal/repositories"
 )
 
-type PostgresStorage struct {
+// Writer asynchronously writes request logs to PostgreSQL, enriching them with
+// HLL cardinality data and indexed metadata along the way.
+type Writer struct {
 	db             *sqlx.DB
 	logChan        chan *models.RequestLog
 	done           chan struct{}
-	activeKeyCache *ActiveKeysCache
-	hllManager     *HLLManager
+	activeKeyCache *repositories.ActiveKeysCache
+	hllManager     *repositories.HLLManager
+	claudeSessions *repositories.ClaudeSessionRepository
 }
 
-// PostgresStorageConfig holds configuration for the storage layer.
-type PostgresStorageConfig struct {
-	HLLFlushInterval   time.Duration
-	ActiveKeysCacheTTL time.Duration
-}
-
-func NewPostgresStorage(ctx context.Context, dsn string, maxConns int, cfg *PostgresStorageConfig) (*PostgresStorage, error) {
-	db, err := sqlx.ConnectContext(ctx, "postgres", dsn)
-	if err != nil {
-		return nil, err
-	}
-
-	db.SetMaxOpenConns(maxConns)
-
-	if err := db.PingContext(ctx); err != nil {
-		db.Close()
-		return nil, err
-	}
-
-	// Use defaults if config not provided
-	if cfg == nil {
-		cfg = &PostgresStorageConfig{
-			HLLFlushInterval:   60 * time.Second,
-			ActiveKeysCacheTTL: 5 * time.Minute,
-		}
-	}
-
-	s := &PostgresStorage{
+// New constructs a Writer and starts the background write loop.
+func New(
+	db *sqlx.DB,
+	activeKeyCache *repositories.ActiveKeysCache,
+	hllManager *repositories.HLLManager,
+	claudeSessions *repositories.ClaudeSessionRepository,
+) *Writer {
+	w := &Writer{
 		db:             db,
 		logChan:        make(chan *models.RequestLog, 1000),
 		done:           make(chan struct{}),
-		activeKeyCache: NewActiveKeysCache(db, cfg.ActiveKeysCacheTTL),
-		hllManager:     NewHLLManager(db, cfg.HLLFlushInterval),
+		activeKeyCache: activeKeyCache,
+		hllManager:     hllManager,
+		claudeSessions: claudeSessions,
 	}
-
-	// Load persisted HLLs on startup
-	if err := s.hllManager.LoadFromDB(ctx); err != nil {
-		slog.Warn("failed to load HLL state from DB", "error", err)
-	}
-
-	s.hllManager.Start()
-	go s.writeLoop()
-
-	return s, nil
+	go w.writeLoop()
+	return w
 }
 
-func (s *PostgresStorage) writeLoop() {
+// WriteRequestLog enqueues a request log for async writing. Non-blocking: drops
+// the log with a warning if the channel is full.
+func (w *Writer) WriteRequestLog(_ context.Context, log *models.RequestLog) {
+	select {
+	case w.logChan <- log:
+	default:
+		slog.Warn("request log channel full, dropping log", "request_id", log.ID)
+	}
+}
+
+// Ping verifies database connectivity. Satisfies server.HealthChecker.
+func (w *Writer) Ping(ctx context.Context) error {
+	return w.db.PingContext(ctx)
+}
+
+// Close drains the write channel, flushes HLLs, and closes the database.
+func (w *Writer) Close() error {
+	close(w.done)
+	if w.hllManager != nil {
+		w.hllManager.Stop()
+	}
+	return w.db.Close()
+}
+
+func (w *Writer) writeLoop() {
 	for {
 		select {
-		case log := <-s.logChan:
-			s.writeLog(log)
-		case <-s.done:
-			for len(s.logChan) > 0 {
-				s.writeLog(<-s.logChan)
+		case log := <-w.logChan:
+			w.writeLog(log)
+		case <-w.done:
+			for len(w.logChan) > 0 {
+				w.writeLog(<-w.logChan)
 			}
 			return
 		}
 	}
 }
 
-func (s *PostgresStorage) writeLog(log *models.RequestLog) {
+func (w *Writer) writeLog(log *models.RequestLog) {
 	ctx := context.Background()
 
-	// Get active keys from cache (only if we have a Majordomo API key)
 	var indexedMetadata map[string]string
 	if log.MajordomoAPIKeyID != nil {
-		activeKeys, _ := s.activeKeyCache.GetActiveKeys(ctx, *log.MajordomoAPIKeyID)
-
-		// Split metadata into raw and indexed
+		activeKeys, _ := w.activeKeyCache.GetActiveKeys(ctx, *log.MajordomoAPIKeyID)
 		indexedMetadata = make(map[string]string)
 		for key, value := range log.RawMetadata {
 			if activeKeys[key] {
@@ -99,7 +97,6 @@ func (s *PostgresStorage) writeLog(log *models.RequestLog) {
 		indexedMetadata = make(map[string]string)
 	}
 
-	// Marshal both metadata columns
 	rawMetadataJSON, err := json.Marshal(log.RawMetadata)
 	if err != nil {
 		slog.Error("failed to marshal raw metadata", "error", err)
@@ -125,7 +122,7 @@ func (s *PostgresStorage) writeLog(log *models.RequestLog) {
 			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29
 		)`
 
-	_, err = s.db.ExecContext(ctx, query,
+	_, err = w.db.ExecContext(ctx, query,
 		log.ID, log.UserID, log.OrgID, log.MajordomoAPIKeyID, log.ProxyKeyID, log.ProviderAPIKeyHash, log.ProviderAPIKeyAlias,
 		log.Provider, log.Model, log.RequestPath, log.RequestMethod,
 		log.RequestedAt, log.RespondedAt, log.ResponseTimeMs,
@@ -139,15 +136,13 @@ func (s *PostgresStorage) writeLog(log *models.RequestLog) {
 		return
 	}
 
-	// Update HLLs and register metadata keys (only if we have a Majordomo API key)
 	if log.MajordomoAPIKeyID != nil {
 		for key, value := range log.RawMetadata {
-			s.hllManager.AddValue(*log.MajordomoAPIKeyID, key, value)
+			w.hllManager.AddValue(*log.MajordomoAPIKeyID, key, value)
 		}
-		s.registerMetadataKeys(ctx, *log.MajordomoAPIKeyID, log.RawMetadata)
+		w.registerMetadataKeys(ctx, *log.MajordomoAPIKeyID, log.RawMetadata)
 	}
 
-	// Write Claude Code request details after llm_requests row exists (FK dependency)
 	if log.ClaudeMetadata != nil {
 		m := log.ClaudeMetadata
 		detail := &models.ClaudeRequestDetail{
@@ -168,18 +163,18 @@ func (s *PostgresStorage) writeLog(log *models.RequestLog) {
 		if m.SystemPromptHash != "" {
 			detail.SystemPromptHash = &m.SystemPromptHash
 		}
-		if err := s.CreateClaudeRequestDetail(ctx, detail); err != nil {
+		if err := w.claudeSessions.CreateClaudeRequestDetail(ctx, detail); err != nil {
 			slog.Error("failed to create claude request detail", "error", err, "request_id", log.ID)
 		}
 		if m.SessionID != nil {
-			if err := s.UpdateClaudeSessionStats(ctx, *m.SessionID, log.InputTokens, log.OutputTokens, log.TotalCost); err != nil {
+			if err := w.claudeSessions.UpdateClaudeSessionStats(ctx, *m.SessionID, log.InputTokens, log.OutputTokens, log.TotalCost); err != nil {
 				slog.Error("failed to update claude session stats", "error", err, "session_id", m.SessionID)
 			}
 		}
 	}
 }
 
-func (s *PostgresStorage) registerMetadataKeys(ctx context.Context, apiKeyID uuid.UUID, metadata map[string]string) {
+func (w *Writer) registerMetadataKeys(ctx context.Context, apiKeyID uuid.UUID, metadata map[string]string) {
 	if len(metadata) == 0 {
 		return
 	}
@@ -190,30 +185,8 @@ func (s *PostgresStorage) registerMetadataKeys(ctx context.Context, apiKeyID uui
 		ON CONFLICT (majordomo_api_key_id, key_name) DO NOTHING`
 
 	for key := range metadata {
-		_, err := s.db.ExecContext(ctx, query, apiKeyID, key)
-		if err != nil {
+		if _, err := w.db.ExecContext(ctx, query, apiKeyID, key); err != nil {
 			slog.Warn("failed to register metadata key", "error", err, "key", key)
 		}
 	}
-}
-
-func (s *PostgresStorage) Ping(ctx context.Context) error {
-	return s.db.PingContext(ctx)
-}
-
-func (s *PostgresStorage) WriteRequestLog(ctx context.Context, log *models.RequestLog) {
-	select {
-	case s.logChan <- log:
-	default:
-		slog.Warn("request log channel full, dropping log", "request_id", log.ID)
-	}
-}
-
-func (s *PostgresStorage) Close() error {
-	close(s.done)
-	// Stop HLL manager (triggers final flush)
-	if s.hllManager != nil {
-		s.hllManager.Stop()
-	}
-	return s.db.Close()
 }

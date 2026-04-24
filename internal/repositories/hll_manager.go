@@ -1,4 +1,4 @@
-package storage
+package repositories
 
 import (
 	"context"
@@ -18,8 +18,8 @@ type hllKey struct {
 
 type hllEntry struct {
 	hll   *hyperloglog.Sketch
-	dirty bool  // modified since last flush
-	count int64 // request count delta
+	dirty bool
+	count int64
 }
 
 // HLLManager manages HyperLogLog sketches for metadata key cardinality estimation.
@@ -85,7 +85,6 @@ func (m *HLLManager) LoadFromDB(ctx context.Context) error {
 	if loaded > 0 {
 		slog.Info("loaded HLL states from database", "count", loaded)
 	}
-
 	return rows.Err()
 }
 
@@ -126,7 +125,6 @@ func (m *HLLManager) flushLoop() {
 				slog.Error("failed to flush HLLs", "error", err)
 			}
 		case <-m.done:
-			// Final flush on shutdown
 			if err := m.Flush(context.Background()); err != nil {
 				slog.Error("failed to flush HLLs on shutdown", "error", err)
 			}
@@ -141,12 +139,7 @@ func (m *HLLManager) Flush(ctx context.Context) error {
 	toFlush := make(map[hllKey]*hllEntry)
 	for k, v := range m.hlls {
 		if v.dirty {
-			// Copy the entry data for flushing
-			toFlush[k] = &hllEntry{
-				hll:   v.hll,
-				count: v.count,
-			}
-			// Mark as clean and reset count
+			toFlush[k] = &hllEntry{hll: v.hll, count: v.count}
 			v.dirty = false
 			v.count = 0
 		}
@@ -160,10 +153,10 @@ func (m *HLLManager) Flush(ctx context.Context) error {
 	query := `
 		UPDATE llm_requests_metadata_keys
 		SET hll_state = $1,
-			approx_cardinality = $2,
-			request_count = request_count + $3,
-			last_seen_at = NOW(),
-			hll_updated_at = NOW()
+		    approx_cardinality = $2,
+		    request_count = request_count + $3,
+		    last_seen_at = NOW(),
+		    hll_updated_at = NOW()
 		WHERE majordomo_api_key_id = $4 AND key_name = $5`
 
 	flushed := 0
@@ -193,7 +186,6 @@ func (m *HLLManager) Flush(ctx context.Context) error {
 	if flushed > 0 {
 		slog.Debug("flushed HLL states", "count", flushed)
 	}
-
 	return nil
 }
 

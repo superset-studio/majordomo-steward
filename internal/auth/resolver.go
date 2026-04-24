@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/superset-studio/majordomo-steward/internal/models"
-	"github.com/superset-studio/majordomo-steward/internal/storage"
+	"github.com/superset-studio/majordomo-steward/internal/repositories"
 )
 
 var (
@@ -26,13 +26,13 @@ type cachedKey struct {
 }
 
 type Resolver struct {
-	storage  storage.APIKeyStorage
+	storage  repositories.APIKeyStorage
 	cache    map[string]*cachedKey
 	cacheMu  sync.RWMutex
 	cacheTTL time.Duration
 }
 
-func NewResolver(storage storage.APIKeyStorage) *Resolver {
+func NewResolver(storage repositories.APIKeyStorage) *Resolver {
 	return &Resolver{
 		storage:  storage,
 		cache:    make(map[string]*cachedKey),

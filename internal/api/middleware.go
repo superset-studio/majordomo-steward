@@ -11,7 +11,7 @@ import (
 
 type contextKey string
 
-const apiKeyInfoKey contextKey = "apiKeyInfo"
+const APIKeyInfoKey contextKey = "apiKeyInfo"
 
 // AuthMiddleware validates the X-Majordomo-Key header and stores the resolved
 // APIKeyInfo in the request context.
@@ -25,7 +25,7 @@ func AuthMiddleware(resolver *auth.Resolver) func(http.Handler) http.Handler {
 				return
 			}
 
-			ctx := context.WithValue(r.Context(), apiKeyInfoKey, info)
+			ctx := context.WithValue(r.Context(), APIKeyInfoKey, info)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
@@ -33,6 +33,6 @@ func AuthMiddleware(resolver *auth.Resolver) func(http.Handler) http.Handler {
 
 // GetAPIKeyInfo retrieves the authenticated APIKeyInfo from the request context.
 func GetAPIKeyInfo(ctx context.Context) *models.APIKeyInfo {
-	info, _ := ctx.Value(apiKeyInfoKey).(*models.APIKeyInfo)
+	info, _ := ctx.Value(APIKeyInfoKey).(*models.APIKeyInfo)
 	return info
 }

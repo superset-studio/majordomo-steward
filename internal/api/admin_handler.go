@@ -3,17 +3,16 @@ package api
 import (
 	"context"
 	"encoding/json"
-	"fmt"
+	"errors"
 	"log/slog"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/superset-studio/majordomo-steward/internal/httputil"
-	"github.com/superset-studio/majordomo-steward/internal/secrets"
-	"github.com/superset-studio/majordomo-steward/internal/storage"
+	"github.com/superset-studio/majordomo-steward/internal/repositories"
+	"github.com/superset-studio/majordomo-steward/internal/services"
 )
 
 // OrgManager starts and stops per-org background workers. Implemented by
@@ -25,7 +24,7 @@ type OrgManager interface {
 
 // AdminStore is the minimal storage interface required by the admin handler.
 type AdminStore interface {
-	ListRegisteredOrgs(ctx context.Context) ([]*storage.RegisteredOrg, error)
+	ListRegisteredOrgs(ctx context.Context) ([]*repositories.RegisteredOrg, error)
 	RegisterOrg(ctx context.Context, orgID uuid.UUID, name, butlerURL, tokenEncrypted string) error
 	RemoveRegisteredOrg(ctx context.Context, orgID uuid.UUID) error
 	CountUnsyncedRecords(ctx context.Context, orgID uuid.UUID) (int, error)
@@ -34,19 +33,17 @@ type AdminStore interface {
 // AdminHandler handles steward admin operations: listing, registering, and
 // deregistering orgs via the local /admin/* API.
 type AdminHandler struct {
-	store      AdminStore
-	workers    OrgManager
-	secrets    secrets.SecretStore
-	httpClient *http.Client
+	store    AdminStore
+	workers  OrgManager
+	orgRegSvc *services.OrgRegistrationService
 }
 
 // NewAdminHandler creates an AdminHandler.
-func NewAdminHandler(store AdminStore, workers OrgManager, secretStore secrets.SecretStore) *AdminHandler {
+func NewAdminHandler(store AdminStore, workers OrgManager, orgRegSvc *services.OrgRegistrationService) *AdminHandler {
 	return &AdminHandler{
-		store:      store,
-		workers:    workers,
-		secrets:    secretStore,
-		httpClient: &http.Client{Timeout: 15 * time.Second},
+		store:     store,
+		workers:   workers,
+		orgRegSvc: orgRegSvc,
 	}
 }
 
@@ -68,13 +65,6 @@ type registerOrgRequest struct {
 type registerOrgResponse struct {
 	OrgID   uuid.UUID `json:"org_id"`
 	OrgName string    `json:"org_name"`
-}
-
-// meResponse mirrors the butler ingest /me response.
-type meResponse struct {
-	StewardID string `json:"steward_id"`
-	OrgID     string `json:"org_id"`
-	OrgName   string `json:"org_name"`
 }
 
 // ── Handlers ───────────────────────────────────────────────────────────────────
@@ -115,52 +105,29 @@ func (h *AdminHandler) HandleRegisterOrg(w http.ResponseWriter, r *http.Request)
 		httputil.WriteJSONError(w, http.StatusBadRequest, "invalid JSON payload")
 		return
 	}
-
 	if req.Token == "" || req.ButlerURL == "" {
 		httputil.WriteJSONError(w, http.StatusBadRequest, "token and butler_url are required")
 		return
 	}
-	if !strings.HasPrefix(req.Token, "mdm_st_") || len(req.Token) <= len("mdm_st_") {
-		httputil.WriteJSONError(w, http.StatusBadRequest, "invalid token format: must start with mdm_st_")
-		return
-	}
 
-	// Validate token and fetch org info from butler.
-	me, err := h.fetchMe(r.Context(), req.ButlerURL, req.Token)
+	org, err := h.orgRegSvc.RegisterOrg(r.Context(), req.ButlerURL, req.Token)
 	if err != nil {
-		httputil.WriteJSONError(w, http.StatusBadGateway, fmt.Sprintf("failed to validate token with butler: %v", err))
+		switch {
+		case errors.Is(err, services.ErrInvalidTokenFormat):
+			httputil.WriteJSONError(w, http.StatusBadRequest, "invalid token format: must start with mdm_st_")
+		case errors.Is(err, services.ErrButlerValidation):
+			httputil.WriteJSONError(w, http.StatusBadGateway, "failed to validate token with butler")
+		default:
+			slog.Error("admin: register org failed", "error", err)
+			httputil.WriteJSONError(w, http.StatusInternalServerError, "failed to register org")
+		}
 		return
 	}
 
-	orgID, err := uuid.Parse(me.OrgID)
-	if err != nil {
-		httputil.WriteJSONError(w, http.StatusBadGateway, "butler returned invalid org_id")
-		return
-	}
-
-	encrypted, err := h.secrets.Encrypt(req.Token)
-	if err != nil {
-		slog.Error("admin: encrypt token failed", "error", err)
-		httputil.WriteJSONError(w, http.StatusInternalServerError, "failed to store token")
-		return
-	}
-
-	if err := h.store.RegisterOrg(r.Context(), orgID, me.OrgName, req.ButlerURL, encrypted); err != nil {
-		slog.Error("admin: register org failed", "org_id", orgID, "error", err)
-		httputil.WriteJSONError(w, http.StatusInternalServerError, "failed to register org")
-		return
-	}
-
-	if err := h.workers.StartOrg(orgID, req.ButlerURL, req.Token); err != nil {
-		slog.Error("admin: start org workers failed", "org_id", orgID, "error", err)
-		httputil.WriteJSONError(w, http.StatusInternalServerError, "org registered but failed to start workers — restart steward to activate")
-		return
-	}
-
-	slog.Info("admin: registered org", "org_id", orgID, "org_name", me.OrgName)
+	slog.Info("admin: registered org", "org_id", org.OrgID, "org_name", org.OrgName)
 	httputil.WriteJSON(w, http.StatusCreated, registerOrgResponse{
-		OrgID:   orgID,
-		OrgName: me.OrgName,
+		OrgID:   org.OrgID,
+		OrgName: org.OrgName,
 	})
 }
 
@@ -185,29 +152,3 @@ func (h *AdminHandler) HandleDeregisterOrg(w http.ResponseWriter, r *http.Reques
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// ── Helpers ────────────────────────────────────────────────────────────────────
-
-func (h *AdminHandler) fetchMe(ctx context.Context, butlerURL, token string) (*meResponse, error) {
-	url := strings.TrimRight(butlerURL, "/") + "/api/v1/steward/me"
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("build request: %w", err)
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-
-	resp, err := h.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("call butler: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("butler returned %d — check token and butler URL", resp.StatusCode)
-	}
-
-	var me meResponse
-	if err := json.NewDecoder(resp.Body).Decode(&me); err != nil {
-		return nil, fmt.Errorf("decode response: %w", err)
-	}
-	return &me, nil
-}

@@ -9,9 +9,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/superset-studio/majordomo-steward/internal/config"
 	"github.com/superset-studio/majordomo-steward/internal/proxy"
+	"github.com/superset-studio/majordomo-steward/internal/repositories"
 	"github.com/superset-studio/majordomo-steward/internal/secrets"
 	"github.com/superset-studio/majordomo-steward/internal/stewardclient"
-	"github.com/superset-studio/majordomo-steward/internal/storage"
 )
 
 // orgWorkers holds the background workers for a single registered org.
@@ -26,10 +26,11 @@ type orgWorkers struct {
 // Workers can be started at server startup (LoadFromDB) or dynamically at runtime
 // (StartOrg) when the managed steward claims new org assignments.
 type WorkerManager struct {
-	cfg     *config.Config
-	store   *storage.PostgresStorage
-	proxy   *proxy.Handler
-	secrets secrets.SecretStore
+	cfg       *config.Config
+	store     *repositories.StewardRepository
+	cloudRepo *repositories.CloudStorageRepository
+	proxy     *proxy.Handler
+	secrets   secrets.SecretStore
 
 	mu     sync.Mutex
 	active map[uuid.UUID]*orgWorkers
@@ -39,16 +40,18 @@ type WorkerManager struct {
 // all already-registered orgs, or StartOrg to add individual orgs at runtime.
 func NewWorkerManager(
 	cfg *config.Config,
-	store *storage.PostgresStorage,
+	store *repositories.StewardRepository,
+	cloudRepo *repositories.CloudStorageRepository,
 	proxyHandler *proxy.Handler,
 	secretStore secrets.SecretStore,
 ) *WorkerManager {
 	return &WorkerManager{
-		cfg:     cfg,
-		store:   store,
-		proxy:   proxyHandler,
-		secrets: secretStore,
-		active:  make(map[uuid.UUID]*orgWorkers),
+		cfg:       cfg,
+		store:     store,
+		cloudRepo: cloudRepo,
+		proxy:     proxyHandler,
+		secrets:   secretStore,
+		active:    make(map[uuid.UUID]*orgWorkers),
 	}
 }
 
@@ -97,7 +100,7 @@ func (m *WorkerManager) StartOrg(orgID uuid.UUID, butlerURL, plaintextToken stri
 	keysync := stewardclient.NewKeySyncer(orgCfg, m.store)
 	keysync.Start()
 
-	cloudSync := stewardclient.NewCloudStorageSyncer(orgCfg, m.store, m.secrets)
+	cloudSync := stewardclient.NewCloudStorageSyncer(orgCfg, m.cloudRepo, m.secrets)
 	cloudSync.Start()
 
 	exec := &jobExecutor{proxy: m.proxy, store: m.store}

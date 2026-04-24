@@ -1,4 +1,4 @@
-package storage
+package repositories
 
 import (
 	"context"
@@ -36,7 +36,6 @@ func NewActiveKeysCache(db *sqlx.DB, ttl time.Duration) *ActiveKeysCache {
 // GetActiveKeys returns the set of active metadata keys for a Majordomo API key ID.
 // Results are cached with TTL to reduce database load.
 func (c *ActiveKeysCache) GetActiveKeys(ctx context.Context, apiKeyID uuid.UUID) (map[string]bool, error) {
-	// Check cache first
 	c.mu.RLock()
 	entry, ok := c.cache[apiKeyID]
 	if ok && time.Now().Before(entry.expiresAt) {
@@ -45,13 +44,11 @@ func (c *ActiveKeysCache) GetActiveKeys(ctx context.Context, apiKeyID uuid.UUID)
 	}
 	c.mu.RUnlock()
 
-	// Cache miss or expired, query database
 	keys, err := c.fetchActiveKeys(ctx, apiKeyID)
 	if err != nil {
 		return nil, err
 	}
 
-	// Update cache
 	c.mu.Lock()
 	c.cache[apiKeyID] = activeKeysEntry{
 		keys:      keys,
@@ -71,7 +68,7 @@ func (c *ActiveKeysCache) fetchActiveKeys(ctx context.Context, apiKeyID uuid.UUI
 	rows, err := c.db.QueryContext(ctx, query, apiKeyID)
 	if err != nil {
 		slog.Warn("failed to fetch active keys", "error", err, "api_key_id", apiKeyID)
-		return make(map[string]bool), nil // Return empty on error to not block logging
+		return make(map[string]bool), nil // return empty on error to not block logging
 	}
 	defer rows.Close()
 
@@ -83,12 +80,10 @@ func (c *ActiveKeysCache) fetchActiveKeys(ctx context.Context, apiKeyID uuid.UUI
 		}
 		keys[keyName] = true
 	}
-
 	return keys, rows.Err()
 }
 
 // InvalidateAPIKey removes the cached entry for a Majordomo API key ID.
-// Call this when keys are activated/deactivated.
 func (c *ActiveKeysCache) InvalidateAPIKey(apiKeyID uuid.UUID) {
 	c.mu.Lock()
 	delete(c.cache, apiKeyID)

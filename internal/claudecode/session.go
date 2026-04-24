@@ -6,16 +6,16 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/superset-studio/majordomo-steward/internal/models"
-	"github.com/superset-studio/majordomo-steward/internal/storage"
+	"github.com/superset-studio/majordomo-steward/internal/repositories"
 )
 
 // SessionManager manages Claude Code session lifecycle.
 type SessionManager struct {
-	store storage.ClaudeSessionStorage
+	store repositories.ClaudeSessionStorage
 }
 
 // NewSessionManager creates a new SessionManager.
-func NewSessionManager(store storage.ClaudeSessionStorage) *SessionManager {
+func NewSessionManager(store repositories.ClaudeSessionStorage) *SessionManager {
 	return &SessionManager{store: store}
 }
 

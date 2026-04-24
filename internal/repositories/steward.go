@@ -1,13 +1,16 @@
-package storage
+package repositories
 
 import (
 	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jmoiron/sqlx"
+
 	"github.com/superset-studio/majordomo-steward/internal/stewardclient"
 )
 
@@ -20,14 +23,21 @@ type RegisteredOrg struct {
 	CreatedAt      time.Time
 }
 
-// DB returns the underlying *sql.DB, used by the migration runner.
-func (s *PostgresStorage) DB() *sql.DB {
-	return s.db.DB
+// StewardRepository handles steward-specific data access: Butler sync, registered
+// orgs, and API key upsert. It satisfies stewardclient.ReporterStore,
+// stewardclient.KeySyncStore, and stewardclient.OrgRegistrar.
+type StewardRepository struct {
+	db *sqlx.DB
+}
+
+// NewStewardRepository constructs a StewardRepository backed by the given database.
+func NewStewardRepository(db *sqlx.DB) *StewardRepository {
+	return &StewardRepository{db: db}
 }
 
 // FetchUnsyncedRecords returns up to limit request logs not yet synced to Butler
 // for the given org, ordered by created_at ascending.
-func (s *PostgresStorage) FetchUnsyncedRecords(ctx context.Context, orgID uuid.UUID, limit int) ([]stewardclient.MetadataRecord, error) {
+func (r *StewardRepository) FetchUnsyncedRecords(ctx context.Context, orgID uuid.UUID, limit int) ([]stewardclient.MetadataRecord, error) {
 	const q = `
 		SELECT
 			id, user_id, majordomo_api_key_id, proxy_key_id,
@@ -44,7 +54,7 @@ func (s *PostgresStorage) FetchUnsyncedRecords(ctx context.Context, orgID uuid.U
 		ORDER BY created_at ASC
 		LIMIT $1`
 
-	rows, err := s.db.QueryContext(ctx, q, limit, orgID)
+	rows, err := r.db.QueryContext(ctx, q, limit, orgID)
 	if err != nil {
 		return nil, fmt.Errorf("fetch unsynced records: %w", err)
 	}
@@ -52,44 +62,43 @@ func (s *PostgresStorage) FetchUnsyncedRecords(ctx context.Context, orgID uuid.U
 
 	var records []stewardclient.MetadataRecord
 	for rows.Next() {
-		var r stewardclient.MetadataRecord
+		var rec stewardclient.MetadataRecord
 		var rawMetaJSON, idxMetaJSON []byte
 		var providerAPIKeyHash, providerAPIKeyAlias sql.NullString
 
 		if err := rows.Scan(
-			&r.ID, &r.UserID, &r.MajordomoAPIKeyID, &r.ProxyKeyID,
+			&rec.ID, &rec.UserID, &rec.MajordomoAPIKeyID, &rec.ProxyKeyID,
 			&providerAPIKeyHash, &providerAPIKeyAlias,
-			&r.Provider, &r.Model, &r.RequestPath, &r.RequestMethod,
-			&r.RequestedAt, &r.RespondedAt, &r.ResponseTimeMS,
-			&r.InputTokens, &r.OutputTokens, &r.CachedTokens, &r.CacheCreationTokens,
-			&r.InputCost, &r.OutputCost, &r.TotalCost,
-			&r.StatusCode, &r.ErrorMessage,
+			&rec.Provider, &rec.Model, &rec.RequestPath, &rec.RequestMethod,
+			&rec.RequestedAt, &rec.RespondedAt, &rec.ResponseTimeMS,
+			&rec.InputTokens, &rec.OutputTokens, &rec.CachedTokens, &rec.CacheCreationTokens,
+			&rec.InputCost, &rec.OutputCost, &rec.TotalCost,
+			&rec.StatusCode, &rec.ErrorMessage,
 			&rawMetaJSON, &idxMetaJSON,
-			&r.BodyS3Key, &r.ModelAliasFound, &r.OrgID,
+			&rec.BodyS3Key, &rec.ModelAliasFound, &rec.OrgID,
 		); err != nil {
 			return nil, fmt.Errorf("scan record: %w", err)
 		}
-		r.ProviderAPIKeyHash = providerAPIKeyHash.String
-		r.ProviderAPIKeyAlias = providerAPIKeyAlias.String
+		rec.ProviderAPIKeyHash = providerAPIKeyHash.String
+		rec.ProviderAPIKeyAlias = providerAPIKeyAlias.String
 
 		if len(rawMetaJSON) > 0 {
-			_ = json.Unmarshal(rawMetaJSON, &r.RawMetadata)
+			_ = json.Unmarshal(rawMetaJSON, &rec.RawMetadata)
 		}
 		if len(idxMetaJSON) > 0 {
-			_ = json.Unmarshal(idxMetaJSON, &r.IndexedMetadata)
+			_ = json.Unmarshal(idxMetaJSON, &rec.IndexedMetadata)
 		}
 
-		records = append(records, r)
+		records = append(records, rec)
 	}
-
 	return records, rows.Err()
 }
 
 // CountUnsyncedRecords returns the number of request logs not yet synced to Butler
 // for the given org.
-func (s *PostgresStorage) CountUnsyncedRecords(ctx context.Context, orgID uuid.UUID) (int, error) {
+func (r *StewardRepository) CountUnsyncedRecords(ctx context.Context, orgID uuid.UUID) (int, error) {
 	var count int
-	err := s.db.QueryRowContext(ctx,
+	err := r.db.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM llm_requests WHERE synced_to_butler = false AND org_id = $1`,
 		orgID,
 	).Scan(&count)
@@ -100,12 +109,11 @@ func (s *PostgresStorage) CountUnsyncedRecords(ctx context.Context, orgID uuid.U
 }
 
 // MarkSynced marks the given request IDs as synced to Butler.
-func (s *PostgresStorage) MarkSynced(ctx context.Context, ids []uuid.UUID) error {
+func (r *StewardRepository) MarkSynced(ctx context.Context, ids []uuid.UUID) error {
 	if len(ids) == 0 {
 		return nil
 	}
 
-	// Build a parameterized IN clause.
 	args := make([]interface{}, len(ids))
 	placeholders := make([]string, len(ids))
 	for i, id := range ids {
@@ -115,26 +123,18 @@ func (s *PostgresStorage) MarkSynced(ctx context.Context, ids []uuid.UUID) error
 
 	q := fmt.Sprintf(
 		`UPDATE llm_requests SET synced_to_butler = true WHERE id IN (%s)`,
-		joinStrings(placeholders, ","),
+		strings.Join(placeholders, ","),
 	)
 
-	_, err := s.db.ExecContext(ctx, q, args...)
-	return err
-}
-
-func joinStrings(ss []string, sep string) string {
-	result := ""
-	for i, s := range ss {
-		if i > 0 {
-			result += sep
-		}
-		result += s
+	_, err := r.db.ExecContext(ctx, q, args...)
+	if err != nil {
+		return fmt.Errorf("mark synced: %w", err)
 	}
-	return result
+	return nil
 }
 
 // UpsertAPIKeys inserts or updates API keys received from Butler's key-sync endpoint.
-func (s *PostgresStorage) UpsertAPIKeys(ctx context.Context, keys []stewardclient.APIKeyRecord) error {
+func (r *StewardRepository) UpsertAPIKeys(ctx context.Context, keys []stewardclient.APIKeyRecord) error {
 	const q = `
 		INSERT INTO api_keys (
 			id, key_hash, name, description, is_active, user_id, org_id,
@@ -154,22 +154,18 @@ func (s *PostgresStorage) UpsertAPIKeys(ctx context.Context, keys []stewardclien
 
 	for i := range keys {
 		k := &keys[i]
-		if _, err := s.db.ExecContext(ctx, q,
+		if _, err := r.db.ExecContext(ctx, q,
 			k.ID, k.KeyHash, k.Name, k.Description, k.IsActive, k.UserID, k.OrgID,
 			k.CreatedAt, k.RevokedAt, k.UpdatedAt,
 		); err != nil {
 			return fmt.Errorf("upsert api key %s: %w", k.ID, err)
 		}
 	}
-
 	return nil
 }
 
-// ── Registered Orgs ───────────────────────────────────────────────────────────
-
-// RegisterOrg upserts a registered org record (org_id is the primary key).
-// Calling this again with the same org_id updates the name, butler_url, and token.
-func (s *PostgresStorage) RegisterOrg(ctx context.Context, orgID uuid.UUID, name, butlerURL, tokenEncrypted string) error {
+// RegisterOrg upserts a registered org record.
+func (r *StewardRepository) RegisterOrg(ctx context.Context, orgID uuid.UUID, name, butlerURL, tokenEncrypted string) error {
 	const q = `
 		INSERT INTO registered_orgs (org_id, name, butler_url, token_encrypted)
 		VALUES ($1, $2, $3, $4)
@@ -178,21 +174,20 @@ func (s *PostgresStorage) RegisterOrg(ctx context.Context, orgID uuid.UUID, name
 			butler_url      = EXCLUDED.butler_url,
 			token_encrypted = EXCLUDED.token_encrypted`
 
-	_, err := s.db.ExecContext(ctx, q, orgID, name, butlerURL, tokenEncrypted)
-	if err != nil {
+	if _, err := r.db.ExecContext(ctx, q, orgID, name, butlerURL, tokenEncrypted); err != nil {
 		return fmt.Errorf("register org: %w", err)
 	}
 	return nil
 }
 
 // ListRegisteredOrgs returns all registered orgs ordered by created_at ascending.
-func (s *PostgresStorage) ListRegisteredOrgs(ctx context.Context) ([]*RegisteredOrg, error) {
+func (r *StewardRepository) ListRegisteredOrgs(ctx context.Context) ([]*RegisteredOrg, error) {
 	const q = `
 		SELECT org_id, name, butler_url, token_encrypted, created_at
 		FROM registered_orgs
 		ORDER BY created_at ASC`
 
-	rows, err := s.db.QueryContext(ctx, q)
+	rows, err := r.db.QueryContext(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("list registered orgs: %w", err)
 	}
@@ -210,9 +205,8 @@ func (s *PostgresStorage) ListRegisteredOrgs(ctx context.Context) ([]*Registered
 }
 
 // RemoveRegisteredOrg deletes the registered org record for the given orgID.
-func (s *PostgresStorage) RemoveRegisteredOrg(ctx context.Context, orgID uuid.UUID) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM registered_orgs WHERE org_id = $1`, orgID)
-	if err != nil {
+func (r *StewardRepository) RemoveRegisteredOrg(ctx context.Context, orgID uuid.UUID) error {
+	if _, err := r.db.ExecContext(ctx, `DELETE FROM registered_orgs WHERE org_id = $1`, orgID); err != nil {
 		return fmt.Errorf("remove registered org: %w", err)
 	}
 	return nil

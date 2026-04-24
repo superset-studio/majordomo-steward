@@ -10,17 +10,17 @@ import (
 	"github.com/google/uuid"
 	"github.com/superset-studio/majordomo-steward/internal/claudecode"
 	"github.com/superset-studio/majordomo-steward/internal/httputil"
-	"github.com/superset-studio/majordomo-steward/internal/storage"
+	"github.com/superset-studio/majordomo-steward/internal/repositories"
 )
 
 // ClaudeSessionHandler provides REST API endpoints for Claude Code session management.
 type ClaudeSessionHandler struct {
 	sessionMgr *claudecode.SessionManager
-	storage    storage.ClaudeSessionStorage
+	storage    repositories.ClaudeSessionStorage
 }
 
 // NewClaudeSessionHandler creates a new handler for Claude Code session endpoints.
-func NewClaudeSessionHandler(mgr *claudecode.SessionManager, store storage.ClaudeSessionStorage) *ClaudeSessionHandler {
+func NewClaudeSessionHandler(mgr *claudecode.SessionManager, store repositories.ClaudeSessionStorage) *ClaudeSessionHandler {
 	return &ClaudeSessionHandler{
 		sessionMgr: mgr,
 		storage:    store,
@@ -74,7 +74,7 @@ func (h *ClaudeSessionHandler) EndSession(w http.ResponseWriter, r *http.Request
 	// Verify ownership
 	existing, err := h.storage.GetClaudeSession(r.Context(), id)
 	if err != nil {
-		if err == storage.ErrClaudeSessionNotFound {
+		if err == repositories.ErrClaudeSessionNotFound {
 			httputil.WriteJSONError(w, http.StatusNotFound, "session not found")
 			return
 		}
@@ -89,7 +89,7 @@ func (h *ClaudeSessionHandler) EndSession(w http.ResponseWriter, r *http.Request
 
 	session, err := h.sessionMgr.EndSession(r.Context(), id)
 	if err != nil {
-		if err == storage.ErrClaudeSessionNotFound {
+		if err == repositories.ErrClaudeSessionNotFound {
 			httputil.WriteJSONError(w, http.StatusNotFound, "session not found or already ended")
 			return
 		}
@@ -140,7 +140,7 @@ func (h *ClaudeSessionHandler) GetSession(w http.ResponseWriter, r *http.Request
 
 	session, err := h.storage.GetClaudeSession(r.Context(), id)
 	if err != nil {
-		if err == storage.ErrClaudeSessionNotFound {
+		if err == repositories.ErrClaudeSessionNotFound {
 			httputil.WriteJSONError(w, http.StatusNotFound, "session not found")
 			return
 		}
@@ -174,7 +174,7 @@ func (h *ClaudeSessionHandler) ListSessionRequests(w http.ResponseWriter, r *htt
 	// Verify ownership
 	session, err := h.storage.GetClaudeSession(r.Context(), id)
 	if err != nil {
-		if err == storage.ErrClaudeSessionNotFound {
+		if err == repositories.ErrClaudeSessionNotFound {
 			httputil.WriteJSONError(w, http.StatusNotFound, "session not found")
 			return
 		}

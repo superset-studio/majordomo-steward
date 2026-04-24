@@ -10,7 +10,7 @@ import (
 	"github.com/superset-studio/majordomo-steward/internal/httputil"
 	"github.com/superset-studio/majordomo-steward/internal/models"
 	"github.com/superset-studio/majordomo-steward/internal/secrets"
-	"github.com/superset-studio/majordomo-steward/internal/storage"
+	"github.com/superset-studio/majordomo-steward/internal/repositories"
 )
 
 // Handler provides REST API endpoints for proxy key management.
@@ -19,7 +19,7 @@ type Handler struct {
 }
 
 // NewHandler creates a new API handler.
-func NewHandler(store storage.ProxyKeyStorage, secretStore secrets.SecretStore) *Handler {
+func NewHandler(store repositories.ProxyKeyStorage, secretStore secrets.SecretStore) *Handler {
 	return &Handler{
 		proxyKeySvc: NewProxyKeyService(store, secretStore),
 	}
@@ -98,7 +98,7 @@ func (h *Handler) GetProxyKey(w http.ResponseWriter, r *http.Request) {
 
 	pk, err := h.proxyKeySvc.GetProxyKey(r.Context(), id, info.ID)
 	if err != nil {
-		if err == storage.ErrProxyKeyNotFound {
+		if err == repositories.ErrProxyKeyNotFound {
 			httputil.WriteJSONError(w, http.StatusNotFound, "proxy key not found")
 			return
 		}
@@ -125,7 +125,7 @@ func (h *Handler) RevokeProxyKey(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.proxyKeySvc.RevokeProxyKey(r.Context(), id, info.ID); err != nil {
-		if err == storage.ErrProxyKeyNotFound {
+		if err == repositories.ErrProxyKeyNotFound {
 			httputil.WriteJSONError(w, http.StatusNotFound, "proxy key not found")
 			return
 		}
@@ -169,7 +169,7 @@ func (h *Handler) SetProviderMapping(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.proxyKeySvc.SetProviderMapping(r.Context(), id, info.ID, providerName, req.APIKey); err != nil {
-		if err == storage.ErrProxyKeyNotFound {
+		if err == repositories.ErrProxyKeyNotFound {
 			httputil.WriteJSONError(w, http.StatusNotFound, "proxy key not found")
 			return
 		}
@@ -198,11 +198,11 @@ func (h *Handler) DeleteProviderMapping(w http.ResponseWriter, r *http.Request) 
 	providerName := chi.URLParam(r, "provider")
 
 	if err := h.proxyKeySvc.DeleteProviderMapping(r.Context(), id, info.ID, providerName); err != nil {
-		if err == storage.ErrProxyKeyNotFound {
+		if err == repositories.ErrProxyKeyNotFound {
 			httputil.WriteJSONError(w, http.StatusNotFound, "proxy key not found")
 			return
 		}
-		if err == storage.ErrProviderMappingNotFound {
+		if err == repositories.ErrProviderMappingNotFound {
 			httputil.WriteJSONError(w, http.StatusNotFound, "provider mapping not found")
 			return
 		}
@@ -230,7 +230,7 @@ func (h *Handler) ListProviderMappings(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := h.proxyKeySvc.ListProviderMappings(r.Context(), id, info.ID)
 	if err != nil {
-		if err == storage.ErrProxyKeyNotFound {
+		if err == repositories.ErrProxyKeyNotFound {
 			httputil.WriteJSONError(w, http.StatusNotFound, "proxy key not found")
 			return
 		}

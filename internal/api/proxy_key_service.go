@@ -9,18 +9,18 @@ import (
 	"github.com/superset-studio/majordomo-steward/internal/auth"
 	"github.com/superset-studio/majordomo-steward/internal/models"
 	"github.com/superset-studio/majordomo-steward/internal/secrets"
-	"github.com/superset-studio/majordomo-steward/internal/storage"
+	"github.com/superset-studio/majordomo-steward/internal/repositories"
 )
 
 // ProxyKeyService encapsulates proxy key CRUD and provider mapping logic
 // shared between Handler (API key auth) and AdminHandler (JWT auth).
 type ProxyKeyService struct {
-	store   storage.ProxyKeyStorage
+	store   repositories.ProxyKeyStorage
 	secrets secrets.SecretStore
 }
 
 // NewProxyKeyService creates a new ProxyKeyService.
-func NewProxyKeyService(store storage.ProxyKeyStorage, secretStore secrets.SecretStore) *ProxyKeyService {
+func NewProxyKeyService(store repositories.ProxyKeyStorage, secretStore secrets.SecretStore) *ProxyKeyService {
 	return &ProxyKeyService{
 		store:   store,
 		secrets: secretStore,
@@ -72,7 +72,7 @@ func (s *ProxyKeyService) GetProxyKey(ctx context.Context, id uuid.UUID, majordo
 	}
 
 	if pk.MajordomoAPIKeyID != majordomoKeyID {
-		return nil, storage.ErrProxyKeyNotFound
+		return nil, repositories.ErrProxyKeyNotFound
 	}
 
 	return pk, nil
@@ -86,7 +86,7 @@ func (s *ProxyKeyService) RevokeProxyKey(ctx context.Context, id uuid.UUID, majo
 	}
 
 	if pk.MajordomoAPIKeyID != majordomoKeyID {
-		return storage.ErrProxyKeyNotFound
+		return repositories.ErrProxyKeyNotFound
 	}
 
 	return s.store.RevokeProxyKey(ctx, id)
@@ -100,7 +100,7 @@ func (s *ProxyKeyService) SetProviderMapping(ctx context.Context, proxyKeyID uui
 	}
 
 	if pk.MajordomoAPIKeyID != majordomoKeyID {
-		return storage.ErrProxyKeyNotFound
+		return repositories.ErrProxyKeyNotFound
 	}
 
 	encrypted, err := s.secrets.Encrypt(apiKey)
@@ -120,7 +120,7 @@ func (s *ProxyKeyService) DeleteProviderMapping(ctx context.Context, proxyKeyID 
 	}
 
 	if pk.MajordomoAPIKeyID != majordomoKeyID {
-		return storage.ErrProxyKeyNotFound
+		return repositories.ErrProxyKeyNotFound
 	}
 
 	return s.store.DeleteProviderMapping(ctx, proxyKeyID, provider)
@@ -134,7 +134,7 @@ func (s *ProxyKeyService) ListProviderMappings(ctx context.Context, proxyKeyID u
 	}
 
 	if pk.MajordomoAPIKeyID != majordomoKeyID {
-		return nil, storage.ErrProxyKeyNotFound
+		return nil, repositories.ErrProxyKeyNotFound
 	}
 
 	mappings, err := s.store.ListProviderMappings(ctx, proxyKeyID)

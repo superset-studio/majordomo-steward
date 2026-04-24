@@ -18,15 +18,21 @@ import (
 	"github.com/superset-studio/majordomo-steward/internal/models"
 	"github.com/superset-studio/majordomo-steward/internal/pricing"
 	"github.com/superset-studio/majordomo-steward/internal/provider"
+	"github.com/superset-studio/majordomo-steward/internal/repositories"
 	"github.com/superset-studio/majordomo-steward/internal/secrets"
 	"github.com/superset-studio/majordomo-steward/internal/storage"
 )
 
+// RequestLogWriter is the minimal interface proxy.Handler needs for writing logs.
+type RequestLogWriter interface {
+	WriteRequestLog(ctx context.Context, log *models.RequestLog)
+}
+
 type Handler struct {
 	upstream           *UpstreamClient
-	storage            storage.Storage
+	storage            RequestLogWriter
 	userBodyStorage    *storage.UserBodyStorage
-	cloudStorageStore  storage.CloudStorageConfigStore
+	cloudStorageStore  repositories.CloudStorageConfigStore
 	secretStore        secrets.SecretStore
 	pricing            *pricing.Service
 	resolver           *auth.Resolver
@@ -55,9 +61,9 @@ type ProviderKeyInfo struct {
 }
 
 func NewHandler(
-	store storage.Storage,
+	store RequestLogWriter,
 	userBodyStorage *storage.UserBodyStorage,
-	cloudStorageStore storage.CloudStorageConfigStore,
+	cloudStorageStore repositories.CloudStorageConfigStore,
 	secretStore secrets.SecretStore,
 	pricingSvc *pricing.Service,
 	resolver *auth.Resolver,
@@ -150,7 +156,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		providerKey, pkID, proxyErr := h.proxyResolver.ResolveProxyKey(ctx, authKey, string(providerInfo.Provider), apiKeyInfo.ID)
 		if proxyErr != nil {
 			slog.Debug("proxy key validation failed", "error", proxyErr)
-			httputil.WriteJSONError(w, http.StatusUnauthorized, proxyErr.Error())
+			httputil.WriteJSONError(w, http.StatusUnauthorized, "invalid or expired proxy key")
 			return
 		}
 		if providerKey != "" {

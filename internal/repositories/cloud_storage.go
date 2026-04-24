@@ -1,4 +1,4 @@
-package storage
+package repositories
 
 import (
 	"context"
@@ -7,26 +7,31 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jmoiron/sqlx"
+
 	"github.com/superset-studio/majordomo-steward/internal/models"
 )
 
-// CloudStorageConfigStore is the minimal interface the proxy.Handler needs
-// to resolve per-owner cloud storage configs, and the CloudStorageSyncer needs
-// to persist synced configs locally.
+// CloudStorageConfigStore is the interface satisfied by CloudStorageRepository.
+// proxy.Handler uses GetCloudStorageConfig; stewardclient.CloudStorageSyncer uses UpsertCloudStorageConfigs.
 type CloudStorageConfigStore interface {
-	// GetCloudStorageConfig returns the stored config for the given owner,
-	// or nil, nil if no config exists.
 	GetCloudStorageConfig(ctx context.Context, ownerID uuid.UUID) (*models.CloudStorageRecord, error)
-
-	// UpsertCloudStorageConfigs upserts the given cloud storage configs into
-	// local storage. Records are added or updated; nothing is deleted.
-	// Deletions are handled by the event-driven sync redesign.
 	UpsertCloudStorageConfigs(ctx context.Context, records []models.CloudStorageRecord) error
+}
+
+// CloudStorageRepository handles cloud storage config data access.
+type CloudStorageRepository struct {
+	db *sqlx.DB
+}
+
+// NewCloudStorageRepository constructs a CloudStorageRepository backed by the given database.
+func NewCloudStorageRepository(db *sqlx.DB) *CloudStorageRepository {
+	return &CloudStorageRepository{db: db}
 }
 
 // GetCloudStorageConfig returns the cloud storage config for the given owner,
 // or nil, nil if none is stored.
-func (s *PostgresStorage) GetCloudStorageConfig(ctx context.Context, ownerID uuid.UUID) (*models.CloudStorageRecord, error) {
+func (r *CloudStorageRepository) GetCloudStorageConfig(ctx context.Context, ownerID uuid.UUID) (*models.CloudStorageRecord, error) {
 	const q = `
 		SELECT owner_id, owner_type, provider,
 		       s3_bucket, s3_region, s3_endpoint,
@@ -36,13 +41,13 @@ func (s *PostgresStorage) GetCloudStorageConfig(ctx context.Context, ownerID uui
 		FROM cloud_storage_configs
 		WHERE owner_id = $1`
 
-	var r models.CloudStorageRecord
-	err := s.db.QueryRowContext(ctx, q, ownerID).Scan(
-		&r.OwnerID, &r.OwnerType, &r.Provider,
-		&r.S3Bucket, &r.S3Region, &r.S3Endpoint,
-		&r.S3AccessKeyIDEncrypted, &r.S3SecretAccessKeyEncrypted,
-		&r.GCSBucket, &r.GCSProjectID, &r.GCSCredentialsJSONEncrypted,
-		&r.SyncedAt,
+	var rec models.CloudStorageRecord
+	err := r.db.QueryRowContext(ctx, q, ownerID).Scan(
+		&rec.OwnerID, &rec.OwnerType, &rec.Provider,
+		&rec.S3Bucket, &rec.S3Region, &rec.S3Endpoint,
+		&rec.S3AccessKeyIDEncrypted, &rec.S3SecretAccessKeyEncrypted,
+		&rec.GCSBucket, &rec.GCSProjectID, &rec.GCSCredentialsJSONEncrypted,
+		&rec.SyncedAt,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -50,18 +55,16 @@ func (s *PostgresStorage) GetCloudStorageConfig(ctx context.Context, ownerID uui
 	if err != nil {
 		return nil, fmt.Errorf("get cloud storage config: %w", err)
 	}
-	return &r, nil
+	return &rec, nil
 }
 
 // UpsertCloudStorageConfigs upserts cloud storage configs into local storage.
-// Each record is inserted or updated by (owner_id, owner_type). Nothing is
-// deleted — removal is handled by the event-driven sync redesign.
-func (s *PostgresStorage) UpsertCloudStorageConfigs(ctx context.Context, records []models.CloudStorageRecord) error {
+func (r *CloudStorageRepository) UpsertCloudStorageConfigs(ctx context.Context, records []models.CloudStorageRecord) error {
 	if len(records) == 0 {
 		return nil
 	}
 
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
 	}
@@ -88,17 +91,19 @@ func (s *PostgresStorage) UpsertCloudStorageConfigs(ctx context.Context, records
 			synced_at                      = EXCLUDED.synced_at`
 
 	now := time.Now()
-	for _, r := range records {
+	for _, rec := range records {
 		if _, err := tx.ExecContext(ctx, q,
-			r.OwnerID, r.OwnerType, r.Provider,
-			r.S3Bucket, r.S3Region, r.S3Endpoint,
-			r.S3AccessKeyIDEncrypted, r.S3SecretAccessKeyEncrypted,
-			r.GCSBucket, r.GCSProjectID, r.GCSCredentialsJSONEncrypted,
+			rec.OwnerID, rec.OwnerType, rec.Provider,
+			rec.S3Bucket, rec.S3Region, rec.S3Endpoint,
+			rec.S3AccessKeyIDEncrypted, rec.S3SecretAccessKeyEncrypted,
+			rec.GCSBucket, rec.GCSProjectID, rec.GCSCredentialsJSONEncrypted,
 			now,
 		); err != nil {
-			return fmt.Errorf("upsert cloud storage config for owner %s: %w", r.OwnerID, err)
+			return fmt.Errorf("upsert cloud storage config for owner %s: %w", rec.OwnerID, err)
 		}
 	}
-
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit upsert cloud storage configs: %w", err)
+	}
+	return nil
 }

@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/superset-studio/majordomo-steward/internal/repositories"
 	"github.com/superset-studio/majordomo-steward/internal/secrets"
-	"github.com/superset-studio/majordomo-steward/internal/storage"
 )
 
 var (
@@ -32,7 +32,7 @@ type cachedProxyKey struct {
 
 // ProxyResolver validates proxy keys and resolves them to decrypted provider API keys.
 type ProxyResolver struct {
-	storage   storage.ProxyKeyStorage
+	storage   repositories.ProxyKeyStorage
 	secrets   secrets.SecretStore
 	cache     map[string]*cachedProxyKey // key_hash → proxy key info
 	provCache map[string]string          // key_hash:provider → decrypted provider key
@@ -41,7 +41,7 @@ type ProxyResolver struct {
 }
 
 // NewProxyResolver creates a new ProxyResolver.
-func NewProxyResolver(storage storage.ProxyKeyStorage, secretStore secrets.SecretStore) *ProxyResolver {
+func NewProxyResolver(storage repositories.ProxyKeyStorage, secretStore secrets.SecretStore) *ProxyResolver {
 	return &ProxyResolver{
 		storage:   storage,
 		secrets:   secretStore,
