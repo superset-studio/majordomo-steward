@@ -22,3 +22,8 @@ func WithPolicyEnforcer(e extension.PolicyEnforcer) HandlerOption {
 func WithRequestEnricher(e extension.RequestEnricher) HandlerOption {
 	return func(h *Handler) { h.requestEnricher = e }
 }
+
+// WithExperimentRouter attaches an experiment router for A/B model assignment.
+func WithExperimentRouter(r *ExperimentRouter) HandlerOption {
+	return func(h *Handler) { h.experimentRouter = r }
+}

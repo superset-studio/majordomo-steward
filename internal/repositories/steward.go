@@ -48,7 +48,8 @@ func (r *StewardRepository) FetchUnsyncedRecords(ctx context.Context, orgID uuid
 			input_cost, output_cost, total_cost,
 			status_code, error_message,
 			raw_metadata, indexed_metadata,
-			body_s3_key, model_alias_found, org_id
+			body_s3_key, model_alias_found, org_id,
+			experiment_id, experiment_arm_id, original_model
 		FROM llm_requests
 		WHERE synced_to_butler = false AND org_id = $2
 		ORDER BY created_at ASC
@@ -76,6 +77,7 @@ func (r *StewardRepository) FetchUnsyncedRecords(ctx context.Context, orgID uuid
 			&rec.StatusCode, &rec.ErrorMessage,
 			&rawMetaJSON, &idxMetaJSON,
 			&rec.BodyS3Key, &rec.ModelAliasFound, &rec.OrgID,
+			&rec.ExperimentID, &rec.ExperimentArmID, &rec.OriginalModel,
 		); err != nil {
 			return nil, fmt.Errorf("scan record: %w", err)
 		}

@@ -45,8 +45,9 @@ type Handler struct {
 	cloudCacheTTL      time.Duration
 
 	// Optional extension points — nil in the OSS binary.
-	policyEnforcer  PolicyEnforcer
-	requestEnricher RequestEnricher
+	policyEnforcer   PolicyEnforcer
+	requestEnricher  RequestEnricher
+	experimentRouter *ExperimentRouter
 }
 
 type cachedCloudStorageConfig struct {
@@ -170,8 +171,40 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		baseURL = providerInfo.BaseURL
 	}
 
-	// Translate request if needed (e.g., OpenAI format → Anthropic format)
+	// Experiment routing: check if this request matches an active experiment and
+	// should be assigned to a specific model arm. Uses the already-extracted
+	// headers map; OriginalModel is populated later in logRequest from reqBody.
+	var experimentAssignment *ExperimentAssignment
+	if h.experimentRouter != nil && apiKeyInfo.OrgID != nil {
+		requestMetadata := extractCustomMetadata(headers)
+		if a := h.experimentRouter.Route(
+			ctx, *apiKeyInfo.OrgID, &apiKeyInfo.ID,
+			requestMetadata, "", time.Now(),
+		); a != nil {
+			experimentAssignment = a
+		}
+	}
+
+	// Apply experiment model override before forwarding upstream.
+	// body retains the original (for logging OriginalModel); upstreamBody gets the override.
 	upstreamBody := body
+	if experimentAssignment != nil {
+		overridden, err := OverrideModel(body, experimentAssignment.AssignedModel)
+		if err != nil {
+			// Log and continue with original model; clear the assignment so we don't
+			// tag the request log with an experiment that wasn't actually applied.
+			slog.Error("failed to override model for experiment",
+				"experiment_id", experimentAssignment.ExperimentID,
+				"arm_id", experimentAssignment.ArmID,
+				"error", err,
+			)
+			experimentAssignment = nil
+		} else {
+			upstreamBody = overridden
+		}
+	}
+
+	// Translate request if needed (e.g., OpenAI format → Anthropic format)
 	if provider.IsTranslationRequired(providerInfo.Provider) {
 		translated, newPath, err := provider.TranslateOpenAIToAnthropic(body)
 		if err != nil {
@@ -247,7 +280,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				ResponseTime: streamResp.ResponseTime,
 			}
 
-			h.logAndFinish(r, requestID, apiKeyInfo, providerKeyInfo, proxyKeyID, providerInfo, body, resp, requestedAt, respondedAt, headers)
+			h.logAndFinish(r, requestID, apiKeyInfo, providerKeyInfo, proxyKeyID, providerInfo, body, resp, requestedAt, respondedAt, headers, experimentAssignment)
 			return
 		}
 
@@ -312,7 +345,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(resp.StatusCode)
 	w.Write(responseBody)
 
-	h.logAndFinish(r, requestID, apiKeyInfo, providerKeyInfo, proxyKeyID, providerInfo, body, resp, requestedAt, respondedAt, headers)
+	h.logAndFinish(r, requestID, apiKeyInfo, providerKeyInfo, proxyKeyID, providerInfo, body, resp, requestedAt, respondedAt, headers, experimentAssignment)
 }
 
 // logAndFinish extracts session metadata from request headers and dispatches
@@ -328,6 +361,7 @@ func (h *Handler) logAndFinish(
 	resp *UpstreamResponse,
 	requestedAt, respondedAt time.Time,
 	headers map[string]string,
+	assignment *ExperimentAssignment,
 ) {
 	// Extract Claude Code session ID if present
 	var sessionID *uuid.UUID
@@ -346,7 +380,7 @@ func (h *Handler) logAndFinish(
 	// Determine if this is a Claude Code request
 	isClaudeCode := r.Header.Get("X-Majordomo-Client") == "claude-code" || sessionID != nil
 
-	go h.logRequest(context.Background(), requestID, apiKeyInfo, providerKeyInfo, proxyKeyID, sessionID, sessionName, isClaudeCode, providerInfo, r, reqBody, resp, requestedAt, respondedAt, headers)
+	go h.logRequest(context.Background(), requestID, apiKeyInfo, providerKeyInfo, proxyKeyID, sessionID, sessionName, isClaudeCode, providerInfo, r, reqBody, resp, requestedAt, respondedAt, headers, assignment)
 }
 
 func (h *Handler) logRequest(
@@ -364,6 +398,7 @@ func (h *Handler) logRequest(
 	resp *UpstreamResponse,
 	requestedAt, respondedAt time.Time,
 	customHeaders map[string]string,
+	assignment *ExperimentAssignment,
 ) {
 	parser := provider.GetParser(providerInfo.Provider)
 	metrics, err := parser.ParseResponse(resp.Body)
@@ -435,6 +470,15 @@ func (h *Handler) logRequest(
 
 		RawMetadata:     extractCustomMetadata(customHeaders),
 		ModelAliasFound: cost.ModelAliasFound,
+	}
+
+	// Attach experiment assignment. OriginalModel is extracted from the unmodified
+	// request body (reqBody always holds the original, pre-override body).
+	if assignment != nil {
+		log.ExperimentID = &assignment.ExperimentID
+		log.ExperimentArmID = &assignment.ArmID
+		originalModel := parser.ExtractModel(reqBody)
+		log.OriginalModel = &originalModel
 	}
 
 	// Body storage: try user/org S3 first, fall back to global storage.

@@ -111,6 +111,7 @@ func Build(ctx context.Context, cfg *config.Config) (*Server, error) {
 	metadataKeyRepo := repositories.NewMetadataKeyRepository(db, activeKeyCache)
 	stewardRepo := repositories.NewStewardRepository(db)
 	cloudRepo := repositories.NewCloudStorageRepository(db)
+	experimentRepo := repositories.NewExperimentRepository(db)
 
 	// ── Request Log Writer ────────────────────────────────────────────────────
 	logWriter := requestlog.New(db, activeKeyCache, hllManager, claudeSessionRepo)
@@ -149,15 +150,18 @@ func Build(ctx context.Context, cfg *config.Config) (*Server, error) {
 		proxySecretStore, _ = secrets.NewAESStore(cfg.Secrets.EncryptionKey)
 	}
 
+	experimentRouter := proxy.NewExperimentRouter(experimentRepo)
+
 	proxyHandler := proxy.NewHandler(
 		logWriter, userBodyStorage, cloudRepo,
 		proxySecretStore, pricingSvc, resolver, proxyResolver, sessionMgr, cfg,
+		proxy.WithExperimentRouter(experimentRouter),
 	)
 
 	// ── Worker Manager (per-org background workers) ───────────────────────────
 	var workerMgr *WorkerManager
 	if proxySecretStore != nil {
-		workerMgr = NewWorkerManager(cfg, stewardRepo, cloudRepo, proxyHandler, proxySecretStore)
+		workerMgr = NewWorkerManager(cfg, stewardRepo, cloudRepo, experimentRepo, proxyHandler, proxySecretStore)
 		if err := workerMgr.LoadFromDB(ctx); err != nil {
 			logWriter.Close()
 			pricingSvc.Close()

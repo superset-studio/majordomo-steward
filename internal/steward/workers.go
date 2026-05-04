@@ -16,21 +16,23 @@ import (
 
 // orgWorkers holds the background workers for a single registered org.
 type orgWorkers struct {
-	reporter    *stewardclient.Reporter
-	keysync     *stewardclient.KeySyncer
-	cloudSync   *stewardclient.CloudStorageSyncer
-	jobs        *stewardclient.JobPoller
+	reporter       *stewardclient.Reporter
+	keysync        *stewardclient.KeySyncer
+	cloudSync      *stewardclient.CloudStorageSyncer
+	experimentSync *stewardclient.ExperimentSyncer
+	jobs           *stewardclient.JobPoller
 }
 
 // WorkerManager manages per-org background workers (reporter, key-syncer, job-poller).
 // Workers can be started at server startup (LoadFromDB) or dynamically at runtime
 // (StartOrg) when the managed steward claims new org assignments.
 type WorkerManager struct {
-	cfg       *config.Config
-	store     *repositories.StewardRepository
-	cloudRepo *repositories.CloudStorageRepository
-	proxy     *proxy.Handler
-	secrets   secrets.SecretStore
+	cfg            *config.Config
+	store          *repositories.StewardRepository
+	cloudRepo      *repositories.CloudStorageRepository
+	experimentRepo *repositories.ExperimentRepository
+	proxy          *proxy.Handler
+	secrets        secrets.SecretStore
 
 	mu     sync.Mutex
 	active map[uuid.UUID]*orgWorkers
@@ -42,16 +44,18 @@ func NewWorkerManager(
 	cfg *config.Config,
 	store *repositories.StewardRepository,
 	cloudRepo *repositories.CloudStorageRepository,
+	experimentRepo *repositories.ExperimentRepository,
 	proxyHandler *proxy.Handler,
 	secretStore secrets.SecretStore,
 ) *WorkerManager {
 	return &WorkerManager{
-		cfg:       cfg,
-		store:     store,
-		cloudRepo: cloudRepo,
-		proxy:     proxyHandler,
-		secrets:   secretStore,
-		active:    make(map[uuid.UUID]*orgWorkers),
+		cfg:            cfg,
+		store:          store,
+		cloudRepo:      cloudRepo,
+		experimentRepo: experimentRepo,
+		proxy:          proxyHandler,
+		secrets:        secretStore,
+		active:         make(map[uuid.UUID]*orgWorkers),
 	}
 }
 
@@ -103,15 +107,19 @@ func (m *WorkerManager) StartOrg(orgID uuid.UUID, butlerURL, plaintextToken stri
 	cloudSync := stewardclient.NewCloudStorageSyncer(orgCfg, m.cloudRepo, m.secrets)
 	cloudSync.Start()
 
+	experimentSync := stewardclient.NewExperimentSyncer(orgCfg, m.experimentRepo)
+	experimentSync.Start()
+
 	exec := &jobExecutor{proxy: m.proxy, store: m.store}
 	jobs := stewardclient.NewJobPoller(orgCfg, exec)
 	jobs.Start()
 
 	m.active[orgID] = &orgWorkers{
-		reporter:  reporter,
-		keysync:   keysync,
-		cloudSync: cloudSync,
-		jobs:      jobs,
+		reporter:       reporter,
+		keysync:        keysync,
+		cloudSync:      cloudSync,
+		experimentSync: experimentSync,
+		jobs:           jobs,
 	}
 
 	slog.Info("started workers for org", "org_id", orgID, "butler_url", butlerURL)
@@ -132,6 +140,7 @@ func (m *WorkerManager) StopOrg(ctx context.Context, orgID uuid.UUID) {
 	w.reporter.Stop()
 	w.keysync.Stop()
 	w.cloudSync.Stop()
+	w.experimentSync.Stop()
 	w.jobs.Stop()
 	delete(m.active, orgID)
 	slog.Info("stopped workers for org", "org_id", orgID)
@@ -146,6 +155,7 @@ func (m *WorkerManager) StopAll() {
 		w.reporter.Stop()
 		w.keysync.Stop()
 		w.cloudSync.Stop()
+		w.experimentSync.Stop()
 		w.jobs.Stop()
 		slog.Info("stopped workers for org", "org_id", orgID)
 	}

@@ -45,6 +45,9 @@ type MetadataRecord struct {
 	BodyS3Key           *string                `json:"body_s3_key,omitempty"`
 	ModelAliasFound     bool                   `json:"model_alias_found"`
 	OrgID               *uuid.UUID             `json:"org_id,omitempty"`
+	ExperimentID        *uuid.UUID             `json:"experiment_id,omitempty"`
+	ExperimentArmID     *uuid.UUID             `json:"experiment_arm_id,omitempty"`
+	OriginalModel       *string                `json:"original_model,omitempty"`
 }
 
 // ReporterStore is the minimal storage interface required by the Reporter.

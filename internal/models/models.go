@@ -231,9 +231,38 @@ type RequestLog struct {
 
 	CreatedAt time.Time `json:"created_at" db:"created_at"`
 
+	// Experiment routing fields — populated when a request was assigned to an experiment arm.
+	ExperimentID    *uuid.UUID `json:"experiment_id,omitempty"     db:"experiment_id"`
+	ExperimentArmID *uuid.UUID `json:"experiment_arm_id,omitempty" db:"experiment_arm_id"`
+	OriginalModel   *string    `json:"original_model,omitempty"    db:"original_model"`
+
 	// Transient — not persisted in llm_requests, carried through the async
 	// write channel so claude_request_details is written after the FK target exists.
 	ClaudeMetadata *ClaudeRequestMetadata `json:"-" db:"-"`
+}
+
+// LocalExperiment is an experiment definition synced from Butler and cached locally.
+type LocalExperiment struct {
+	ID              uuid.UUID         `db:"id"`
+	OrgID           uuid.UUID         `db:"org_id"`
+	Status          string            `db:"status"`
+	APIKeyID        *uuid.UUID        `db:"api_key_id"`
+	MetadataFilters map[string]string `db:"-"` // populated from metadata_filters JSONB
+	StickyKey       *string           `db:"sticky_key"`
+	StartsAt        time.Time         `db:"starts_at"`
+	EndsAt          time.Time         `db:"ends_at"`
+	UpdatedAt       time.Time         `db:"updated_at"`
+	Arms            []LocalExperimentArm `db:"-"`
+}
+
+// LocalExperimentArm is one arm of a locally-cached experiment.
+type LocalExperimentArm struct {
+	ID           uuid.UUID `db:"id"`
+	ExperimentID uuid.UUID `db:"experiment_id"`
+	Name         string    `db:"name"`
+	Model        string    `db:"model"`
+	Weight       int       `db:"weight"`
+	IsControl    bool      `db:"is_control"`
 }
 
 // ClaudeRequestMetadata holds parsed Claude Code metadata attached to a RequestLog
