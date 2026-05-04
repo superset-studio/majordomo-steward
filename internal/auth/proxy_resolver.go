@@ -6,20 +6,25 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
+	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/superset-studio/majordomo-steward/internal/repositories"
 	"github.com/superset-studio/majordomo-steward/internal/secrets"
 )
 
+const (
+	proxyKeyCacheSize = 4096
+	provKeyCacheSize  = 16384 // 4096 keys × ~4 providers each
+)
+
 var (
-	ErrProxyKeyNotFound     = errors.New("proxy key not found")
-	ErrProxyKeyRevoked      = errors.New("proxy key has been revoked")
-	ErrProxyKeyInactive     = errors.New("proxy key is not active")
-	ErrProxyKeyWrongOwner   = errors.New("proxy key does not belong to this Majordomo key")
-	ErrNoProviderMapping    = errors.New("no provider key configured")
+	ErrProxyKeyNotFound   = errors.New("proxy key not found")
+	ErrProxyKeyRevoked    = errors.New("proxy key has been revoked")
+	ErrProxyKeyInactive   = errors.New("proxy key is not active")
+	ErrProxyKeyWrongOwner = errors.New("proxy key does not belong to this Majordomo key")
+	ErrNoProviderMapping  = errors.New("no provider key configured")
 )
 
 type cachedProxyKey struct {
@@ -34,19 +39,26 @@ type cachedProxyKey struct {
 type ProxyResolver struct {
 	storage   repositories.ProxyKeyStorage
 	secrets   secrets.SecretStore
-	cache     map[string]*cachedProxyKey // key_hash → proxy key info
-	provCache map[string]string          // key_hash:provider → decrypted provider key
-	cacheMu   sync.RWMutex
+	keyCache  *lru.Cache[string, *cachedProxyKey] // hash → proxy key metadata
+	provCache *lru.Cache[string, string]           // hash:provider → decrypted provider key
 	cacheTTL  time.Duration
 }
 
 // NewProxyResolver creates a new ProxyResolver.
 func NewProxyResolver(storage repositories.ProxyKeyStorage, secretStore secrets.SecretStore) *ProxyResolver {
+	keyCache, err := lru.New[string, *cachedProxyKey](proxyKeyCacheSize)
+	if err != nil {
+		panic(err) // only possible if proxyKeyCacheSize <= 0
+	}
+	provCache, err := lru.New[string, string](provKeyCacheSize)
+	if err != nil {
+		panic(err) // only possible if provKeyCacheSize <= 0
+	}
 	return &ProxyResolver{
 		storage:   storage,
 		secrets:   secretStore,
-		cache:     make(map[string]*cachedProxyKey),
-		provCache: make(map[string]string),
+		keyCache:  keyCache,
+		provCache: provCache,
 		cacheTTL:  5 * time.Minute,
 	}
 }
@@ -59,18 +71,15 @@ func (r *ProxyResolver) ResolveProxyKey(ctx context.Context, authKey string, pro
 	}
 
 	hash := HashAPIKey(authKey)
-
-	// Check provider key cache
 	provCacheKey := hash + ":" + provider
-	r.cacheMu.RLock()
-	if cached, ok := r.provCache[provCacheKey]; ok {
-		if pkc, ok := r.cache[hash]; ok && time.Now().Before(pkc.expiresAt) {
+
+	// Check provider key cache — valid only if the key metadata is also cached and not expired.
+	if decrypted, ok := r.provCache.Get(provCacheKey); ok {
+		if pkc, ok := r.keyCache.Get(hash); ok && time.Now().Before(pkc.expiresAt) {
 			id := pkc.proxyKeyID
-			r.cacheMu.RUnlock()
-			return cached, &id, nil
+			return decrypted, &id, nil
 		}
 	}
-	r.cacheMu.RUnlock()
 
 	// DB lookup
 	proxyKey, err := r.storage.GetProxyKeyByHash(ctx, hash)
@@ -108,16 +117,14 @@ func (r *ProxyResolver) ResolveProxyKey(ctx context.Context, authKey string, pro
 	}
 
 	// Cache the results
-	r.cacheMu.Lock()
-	r.cache[hash] = &cachedProxyKey{
+	r.keyCache.Add(hash, &cachedProxyKey{
 		proxyKeyID:        proxyKey.ID,
 		majordomoAPIKeyID: proxyKey.MajordomoAPIKeyID,
 		isActive:          proxyKey.IsActive,
 		revokedAt:         proxyKey.RevokedAt,
 		expiresAt:         time.Now().Add(r.cacheTTL),
-	}
-	r.provCache[provCacheKey] = decrypted
-	r.cacheMu.Unlock()
+	})
+	r.provCache.Add(provCacheKey, decrypted)
 
 	// Update last_used_at asynchronously
 	go func() {
@@ -130,16 +137,9 @@ func (r *ProxyResolver) ResolveProxyKey(ctx context.Context, authKey string, pro
 	return decrypted, &id, nil
 }
 
-// InvalidateCache removes a specific proxy key from the cache.
+// InvalidateCache removes a specific proxy key from the cache (call after revocation).
+// Orphaned provCache entries for this hash are effectively dead without a valid keyCache
+// entry and will be evicted by LRU pressure.
 func (r *ProxyResolver) InvalidateCache(hash string) {
-	r.cacheMu.Lock()
-	defer r.cacheMu.Unlock()
-	delete(r.cache, hash)
-	// Also remove all provider cache entries for this hash
-	prefix := hash + ":"
-	for k := range r.provCache {
-		if strings.HasPrefix(k, prefix) {
-			delete(r.provCache, k)
-		}
-	}
+	r.keyCache.Remove(hash)
 }

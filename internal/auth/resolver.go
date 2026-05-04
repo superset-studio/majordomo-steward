@@ -6,12 +6,14 @@ import (
 	"encoding/hex"
 	"errors"
 	"log/slog"
-	"sync"
 	"time"
 
+	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/superset-studio/majordomo-steward/internal/models"
 	"github.com/superset-studio/majordomo-steward/internal/repositories"
 )
+
+const resolverCacheSize = 4096
 
 var (
 	ErrInvalidAPIKey  = errors.New("invalid API key")
@@ -27,15 +29,18 @@ type cachedKey struct {
 
 type Resolver struct {
 	storage  repositories.APIKeyStorage
-	cache    map[string]*cachedKey
-	cacheMu  sync.RWMutex
+	cache    *lru.Cache[string, *cachedKey]
 	cacheTTL time.Duration
 }
 
 func NewResolver(storage repositories.APIKeyStorage) *Resolver {
+	cache, err := lru.New[string, *cachedKey](resolverCacheSize)
+	if err != nil {
+		panic(err) // only possible if resolverCacheSize <= 0
+	}
 	return &Resolver{
 		storage:  storage,
-		cache:    make(map[string]*cachedKey),
+		cache:    cache,
 		cacheTTL: 5 * time.Minute,
 	}
 }
@@ -95,51 +100,39 @@ func (r *Resolver) ResolveAPIKey(ctx context.Context, apiKey string) (*models.AP
 }
 
 func (r *Resolver) getFromCache(hash string) *cachedKey {
-	r.cacheMu.RLock()
-	defer r.cacheMu.RUnlock()
-
-	cached, ok := r.cache[hash]
+	cached, ok := r.cache.Get(hash)
 	if !ok {
 		return nil
 	}
-
 	if time.Now().After(cached.expiresAt) {
-		return nil // Expired
+		r.cache.Remove(hash)
+		return nil
 	}
-
 	return cached
 }
 
 func (r *Resolver) cacheValid(hash string, info *models.APIKeyInfo) {
-	r.cacheMu.Lock()
-	defer r.cacheMu.Unlock()
-
-	r.cache[hash] = &cachedKey{
+	r.cache.Add(hash, &cachedKey{
 		info:      info,
 		expiresAt: time.Now().Add(r.cacheTTL),
 		isValid:   true,
-	}
+	})
 }
 
 func (r *Resolver) cacheInvalid(hash string) {
-	r.cacheMu.Lock()
-	defer r.cacheMu.Unlock()
-
-	r.cache[hash] = &cachedKey{
+	r.cache.Add(hash, &cachedKey{
 		info:      nil,
 		expiresAt: time.Now().Add(r.cacheTTL),
 		isValid:   false,
-	}
+	})
 }
 
-// InvalidateCache removes a specific key from the cache (call after revocation)
+// InvalidateCache removes a specific key from the cache (call after revocation).
 func (r *Resolver) InvalidateCache(hash string) {
-	r.cacheMu.Lock()
-	defer r.cacheMu.Unlock()
-	delete(r.cache, hash)
+	r.cache.Remove(hash)
 }
 
-// HashAPIKey computes SHA256 hash of an API key
+// HashAPIKey computes SHA256 hash of an API key.
 func HashAPIKey(key string) string {
 	h := sha256.Sum256([]byte(key))
 	return hex.EncodeToString(h[:])
