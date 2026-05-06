@@ -99,17 +99,18 @@ type EmailVerificationToken struct {
 
 // APIKey represents a Majordomo API key stored in the database
 type APIKey struct {
-	ID           uuid.UUID  `json:"id" db:"id"`
-	KeyHash      string     `json:"-" db:"key_hash"` // Never expose in JSON
-	Name         string     `json:"name" db:"name"`
-	Description  *string    `json:"description,omitempty" db:"description"`
-	UserID       *uuid.UUID `json:"user_id,omitempty" db:"user_id"`
-	OrgID        *uuid.UUID `json:"org_id,omitempty" db:"org_id"`
-	IsActive     bool       `json:"is_active" db:"is_active"`
-	CreatedAt    time.Time  `json:"created_at" db:"created_at"`
-	RevokedAt    *time.Time `json:"revoked_at,omitempty" db:"revoked_at"`
-	LastUsedAt   *time.Time `json:"last_used_at,omitempty" db:"last_used_at"`
-	RequestCount int64      `json:"request_count" db:"request_count"`
+	ID                      uuid.UUID               `json:"id" db:"id"`
+	KeyHash                 string                  `json:"-" db:"key_hash"` // Never expose in JSON
+	Name                    string                  `json:"name" db:"name"`
+	Description             *string                 `json:"description,omitempty" db:"description"`
+	UserID                  *uuid.UUID              `json:"user_id,omitempty" db:"user_id"`
+	OrgID                   *uuid.UUID              `json:"org_id,omitempty" db:"org_id"`
+	IsActive                bool                    `json:"is_active" db:"is_active"`
+	CreatedAt               time.Time               `json:"created_at" db:"created_at"`
+	RevokedAt               *time.Time              `json:"revoked_at,omitempty" db:"revoked_at"`
+	LastUsedAt              *time.Time              `json:"last_used_at,omitempty" db:"last_used_at"`
+	RequestCount            int64                   `json:"request_count" db:"request_count"`
+	DeprecatedModelBehavior DeprecatedModelBehavior `json:"deprecated_model_behavior" db:"deprecated_model_behavior"`
 }
 
 // CreateAPIKeyInput contains fields for creating a new API key
@@ -122,17 +123,37 @@ type CreateAPIKeyInput struct {
 
 // UpdateAPIKeyInput contains fields for updating an API key
 type UpdateAPIKeyInput struct {
-	Name        *string
-	Description *string
+	Name                    *string
+	Description             *string
+	DeprecatedModelBehavior *DeprecatedModelBehavior
 }
+
+// DeprecatedModelBehavior controls how steward handles requests for deprecated models.
+type DeprecatedModelBehavior string
+
+const (
+	// DeprecatedModelBehaviorPassthrough forwards the request as-is; the upstream
+	// provider will reject it if the model has been fully retired.
+	DeprecatedModelBehaviorPassthrough DeprecatedModelBehavior = "passthrough"
+
+	// DeprecatedModelBehaviorRedirect silently substitutes the recommended
+	// replacement before forwarding. The original model is recorded in the log.
+	DeprecatedModelBehaviorRedirect DeprecatedModelBehavior = "redirect"
+
+	// DeprecatedModelBehaviorWarn redirects like Redirect but also adds
+	// X-Majordomo-Deprecated-Model and X-Majordomo-Deprecated-Replacement headers
+	// to the response so the caller can detect and fix the usage.
+	DeprecatedModelBehaviorWarn DeprecatedModelBehavior = "warn"
+)
 
 // APIKeyInfo contains resolved API key information for request processing
 type APIKeyInfo struct {
-	ID     uuid.UUID  // Database ID for FK reference
-	Hash   string     // SHA256 hash of the key
-	Alias  *string    // Optional alias (key name)
-	UserID *uuid.UUID // Owning user (if key belongs to a user)
-	OrgID  *uuid.UUID // Owning organization (if key belongs to an org)
+	ID                     uuid.UUID               // Database ID for FK reference
+	Hash                   string                  // SHA256 hash of the key
+	Alias                  *string                 // Optional alias (key name)
+	UserID                 *uuid.UUID              // Owning user (if key belongs to a user)
+	OrgID                  *uuid.UUID              // Owning organization (if key belongs to an org)
+	DeprecatedModelBehavior DeprecatedModelBehavior // How to handle deprecated model requests
 }
 
 type UsageMetrics struct {
@@ -235,6 +256,9 @@ type RequestLog struct {
 	ExperimentID    *uuid.UUID `json:"experiment_id,omitempty"     db:"experiment_id"`
 	ExperimentArmID *uuid.UUID `json:"experiment_arm_id,omitempty" db:"experiment_arm_id"`
 	OriginalModel   *string    `json:"original_model,omitempty"    db:"original_model"`
+
+	// Deprecated model redirect — true when steward substituted a replacement model.
+	DeprecatedModelRedirected bool `json:"deprecated_model_redirected" db:"deprecated_model_redirected"`
 
 	// Transient — not persisted in llm_requests, carried through the async
 	// write channel so claude_request_details is written after the FK target exists.

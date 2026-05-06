@@ -12,6 +12,7 @@ import (
 	"github.com/superset-studio/majordomo-steward/internal/auth"
 	"github.com/superset-studio/majordomo-steward/internal/claudecode"
 	"github.com/superset-studio/majordomo-steward/internal/config"
+	"github.com/superset-studio/majordomo-steward/internal/deprecated"
 	"github.com/superset-studio/majordomo-steward/internal/migrate"
 	"github.com/superset-studio/majordomo-steward/internal/pricing"
 	"github.com/superset-studio/majordomo-steward/internal/proxy"
@@ -124,6 +125,9 @@ func Build(ctx context.Context, cfg *config.Config) (*Server, error) {
 		cfg.Pricing.RefreshInterval,
 	)
 
+	// ── Deprecated Models ─────────────────────────────────────────────────────
+	deprecatedSvc := deprecated.NewService(cfg.Pricing.DeprecatedModelsFile)
+
 	// ── Auth ──────────────────────────────────────────────────────────────────
 	resolver := auth.NewResolver(apiKeyRepo)
 
@@ -154,7 +158,7 @@ func Build(ctx context.Context, cfg *config.Config) (*Server, error) {
 
 	proxyHandler := proxy.NewHandler(
 		logWriter, userBodyStorage, cloudRepo,
-		proxySecretStore, pricingSvc, resolver, proxyResolver, sessionMgr, cfg,
+		proxySecretStore, pricingSvc, deprecatedSvc, resolver, proxyResolver, sessionMgr, cfg,
 		proxy.WithExperimentRouter(experimentRouter),
 	)
 

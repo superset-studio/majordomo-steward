@@ -14,16 +14,17 @@ import (
 
 // APIKeyRecord is the API key representation returned by Butler's key-sync endpoint.
 type APIKeyRecord struct {
-	ID          uuid.UUID  `json:"id"`
-	KeyHash     string     `json:"key_hash"`
-	Name        string     `json:"name"`
-	Description *string    `json:"description,omitempty"`
-	IsActive    bool       `json:"is_active"`
-	UserID      *uuid.UUID `json:"user_id,omitempty"`
-	OrgID       *uuid.UUID `json:"org_id,omitempty"`
-	CreatedAt   time.Time  `json:"created_at"`
-	RevokedAt   *time.Time `json:"revoked_at,omitempty"`
-	UpdatedAt   time.Time  `json:"updated_at"`
+	ID                      uuid.UUID `json:"id"`
+	KeyHash                 string    `json:"key_hash"`
+	Name                    string    `json:"name"`
+	Description             *string   `json:"description,omitempty"`
+	IsActive                bool      `json:"is_active"`
+	UserID                  *uuid.UUID `json:"user_id,omitempty"`
+	OrgID                   *uuid.UUID `json:"org_id,omitempty"`
+	CreatedAt               time.Time  `json:"created_at"`
+	RevokedAt               *time.Time `json:"revoked_at,omitempty"`
+	UpdatedAt               time.Time  `json:"updated_at"`
+	DeprecatedModelBehavior string     `json:"deprecated_model_behavior"`
 }
 
 // KeySyncStore is the minimal storage interface required by the key-sync worker.

@@ -36,7 +36,7 @@ func NewAPIKeyRepository(db *sqlx.DB) *APIKeyRepository {
 	return &APIKeyRepository{db: db}
 }
 
-const apiKeyColumns = `id, key_hash, name, description, user_id, org_id, is_active, created_at, revoked_at, last_used_at, request_count`
+const apiKeyColumns = `id, key_hash, name, description, user_id, org_id, is_active, created_at, revoked_at, last_used_at, request_count, deprecated_model_behavior`
 
 func (r *APIKeyRepository) CreateAPIKey(ctx context.Context, keyHash string, input *models.CreateAPIKeyInput) (*models.APIKey, error) {
 	query := `
@@ -100,6 +100,11 @@ func (r *APIKeyRepository) UpdateAPIKey(ctx context.Context, id uuid.UUID, input
 	if input.Description != nil {
 		setClauses = append(setClauses, fmt.Sprintf("description = $%d", argIdx))
 		args = append(args, *input.Description)
+		argIdx++
+	}
+	if input.DeprecatedModelBehavior != nil {
+		setClauses = append(setClauses, fmt.Sprintf("deprecated_model_behavior = $%d", argIdx))
+		args = append(args, *input.DeprecatedModelBehavior)
 		argIdx++
 	}
 

@@ -140,25 +140,30 @@ func (r *StewardRepository) UpsertAPIKeys(ctx context.Context, keys []stewardcli
 	const q = `
 		INSERT INTO api_keys (
 			id, key_hash, name, description, is_active, user_id, org_id,
-			created_at, revoked_at, updated_at
+			created_at, revoked_at, updated_at, deprecated_model_behavior
 		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
 		)
 		ON CONFLICT (id) DO UPDATE SET
-			key_hash    = EXCLUDED.key_hash,
-			name        = EXCLUDED.name,
-			description = EXCLUDED.description,
-			is_active   = EXCLUDED.is_active,
-			user_id     = EXCLUDED.user_id,
-			org_id      = EXCLUDED.org_id,
-			revoked_at  = EXCLUDED.revoked_at,
-			updated_at  = EXCLUDED.updated_at`
+			key_hash                  = EXCLUDED.key_hash,
+			name                      = EXCLUDED.name,
+			description               = EXCLUDED.description,
+			is_active                 = EXCLUDED.is_active,
+			user_id                   = EXCLUDED.user_id,
+			org_id                    = EXCLUDED.org_id,
+			revoked_at                = EXCLUDED.revoked_at,
+			updated_at                = EXCLUDED.updated_at,
+			deprecated_model_behavior = EXCLUDED.deprecated_model_behavior`
 
 	for i := range keys {
 		k := &keys[i]
+		behavior := k.DeprecatedModelBehavior
+		if behavior == "" {
+			behavior = "passthrough"
+		}
 		if _, err := r.db.ExecContext(ctx, q,
 			k.ID, k.KeyHash, k.Name, k.Description, k.IsActive, k.UserID, k.OrgID,
-			k.CreatedAt, k.RevokedAt, k.UpdatedAt,
+			k.CreatedAt, k.RevokedAt, k.UpdatedAt, behavior,
 		); err != nil {
 			return fmt.Errorf("upsert api key %s: %w", k.ID, err)
 		}

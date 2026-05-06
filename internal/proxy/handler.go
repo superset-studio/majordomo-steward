@@ -14,6 +14,7 @@ import (
 	"github.com/superset-studio/majordomo-steward/internal/auth"
 	"github.com/superset-studio/majordomo-steward/internal/claudecode"
 	"github.com/superset-studio/majordomo-steward/internal/config"
+	"github.com/superset-studio/majordomo-steward/internal/deprecated"
 	"github.com/superset-studio/majordomo-steward/internal/httputil"
 	"github.com/superset-studio/majordomo-steward/internal/models"
 	"github.com/superset-studio/majordomo-steward/internal/pricing"
@@ -44,6 +45,8 @@ type Handler struct {
 	orgCloudCache      sync.Map // orgID (string) → *cachedCloudStorageConfig
 	cloudCacheTTL      time.Duration
 
+	deprecatedModels *deprecated.Service
+
 	// Optional extension points — nil in the OSS binary.
 	policyEnforcer   PolicyEnforcer
 	requestEnricher  RequestEnricher
@@ -67,6 +70,7 @@ func NewHandler(
 	cloudStorageStore repositories.CloudStorageConfigStore,
 	secretStore secrets.SecretStore,
 	pricingSvc *pricing.Service,
+	deprecatedSvc *deprecated.Service,
 	resolver *auth.Resolver,
 	proxyResolver *auth.ProxyResolver,
 	sessionMgr *claudecode.SessionManager,
@@ -86,6 +90,7 @@ func NewHandler(
 		cloudStorageStore: cloudStorageStore,
 		secretStore:       secretStore,
 		pricing:           pricingSvc,
+		deprecatedModels:  deprecatedSvc,
 		resolver:          resolver,
 		proxyResolver:     proxyResolver,
 		sessionMgr:        sessionMgr,
@@ -171,6 +176,36 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		baseURL = providerInfo.BaseURL
 	}
 
+	// Deprecated model check: if the requested model is deprecated and the API key
+	// is configured to redirect or warn, substitute the replacement before forwarding.
+	// Response warning headers are set now so they are present regardless of whether
+	// the path is streaming or buffered (headers must be set before WriteHeader).
+	upstreamBody := body
+	var deprecatedModelRedirected bool
+	var deprecatedOriginalModel string
+	if h.deprecatedModels != nil {
+		parser := provider.GetParser(providerInfo.Provider)
+		requestedModel := parser.ExtractModel(body)
+		if replacement, isDeprecated := h.deprecatedModels.Lookup(requestedModel); isDeprecated {
+			switch apiKeyInfo.DeprecatedModelBehavior {
+			case models.DeprecatedModelBehaviorRedirect, models.DeprecatedModelBehaviorWarn:
+				overridden, err := OverrideModel(body, replacement)
+				if err != nil {
+					slog.Warn("failed to override deprecated model", "model", requestedModel, "replacement", replacement, "error", err)
+				} else {
+					upstreamBody = overridden
+					deprecatedModelRedirected = true
+					deprecatedOriginalModel = requestedModel
+					if apiKeyInfo.DeprecatedModelBehavior == models.DeprecatedModelBehaviorWarn {
+						slog.Warn("deprecated model used", "model", requestedModel, "replacement", replacement, "api_key_id", apiKeyInfo.ID)
+						w.Header().Set("X-Majordomo-Deprecated-Model", requestedModel)
+						w.Header().Set("X-Majordomo-Deprecated-Replacement", replacement)
+					}
+				}
+			}
+		}
+	}
+
 	// Experiment routing: check if this request matches an active experiment and
 	// should be assigned to a specific model arm. Uses the already-extracted
 	// headers map; OriginalModel is populated later in logRequest from reqBody.
@@ -187,7 +222,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Apply experiment model override before forwarding upstream.
 	// body retains the original (for logging OriginalModel); upstreamBody gets the override.
-	upstreamBody := body
 	if experimentAssignment != nil {
 		overridden, err := OverrideModel(body, experimentAssignment.AssignedModel)
 		if err != nil {
@@ -280,7 +314,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				ResponseTime: streamResp.ResponseTime,
 			}
 
-			h.logAndFinish(r, requestID, apiKeyInfo, providerKeyInfo, proxyKeyID, providerInfo, body, resp, requestedAt, respondedAt, headers, experimentAssignment)
+			h.logAndFinish(r, requestID, apiKeyInfo, providerKeyInfo, proxyKeyID, providerInfo, body, resp, requestedAt, respondedAt, headers, experimentAssignment, deprecatedModelRedirected, deprecatedOriginalModel)
 			return
 		}
 
@@ -345,7 +379,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(resp.StatusCode)
 	w.Write(responseBody)
 
-	h.logAndFinish(r, requestID, apiKeyInfo, providerKeyInfo, proxyKeyID, providerInfo, body, resp, requestedAt, respondedAt, headers, experimentAssignment)
+	h.logAndFinish(r, requestID, apiKeyInfo, providerKeyInfo, proxyKeyID, providerInfo, body, resp, requestedAt, respondedAt, headers, experimentAssignment, deprecatedModelRedirected, deprecatedOriginalModel)
 }
 
 // logAndFinish extracts session metadata from request headers and dispatches
@@ -362,6 +396,8 @@ func (h *Handler) logAndFinish(
 	requestedAt, respondedAt time.Time,
 	headers map[string]string,
 	assignment *ExperimentAssignment,
+	deprecatedModelRedirected bool,
+	deprecatedOriginalModel string,
 ) {
 	// Extract Claude Code session ID if present
 	var sessionID *uuid.UUID
@@ -380,7 +416,7 @@ func (h *Handler) logAndFinish(
 	// Determine if this is a Claude Code request
 	isClaudeCode := r.Header.Get("X-Majordomo-Client") == "claude-code" || sessionID != nil
 
-	go h.logRequest(context.Background(), requestID, apiKeyInfo, providerKeyInfo, proxyKeyID, sessionID, sessionName, isClaudeCode, providerInfo, r, reqBody, resp, requestedAt, respondedAt, headers, assignment)
+	go h.logRequest(context.Background(), requestID, apiKeyInfo, providerKeyInfo, proxyKeyID, sessionID, sessionName, isClaudeCode, providerInfo, r, reqBody, resp, requestedAt, respondedAt, headers, assignment, deprecatedModelRedirected, deprecatedOriginalModel)
 }
 
 func (h *Handler) logRequest(
@@ -399,6 +435,8 @@ func (h *Handler) logRequest(
 	requestedAt, respondedAt time.Time,
 	customHeaders map[string]string,
 	assignment *ExperimentAssignment,
+	deprecatedModelRedirected bool,
+	deprecatedOriginalModel string,
 ) {
 	parser := provider.GetParser(providerInfo.Provider)
 	metrics, err := parser.ParseResponse(resp.Body)
@@ -472,8 +510,17 @@ func (h *Handler) logRequest(
 		ModelAliasFound: cost.ModelAliasFound,
 	}
 
+	// Attach deprecated model redirect info. OriginalModel records what the client
+	// actually requested before steward substituted the replacement.
+	if deprecatedModelRedirected {
+		log.DeprecatedModelRedirected = true
+		log.OriginalModel = &deprecatedOriginalModel
+	}
+
 	// Attach experiment assignment. OriginalModel is extracted from the unmodified
 	// request body (reqBody always holds the original, pre-override body).
+	// Experiment assignment takes precedence over the deprecated-redirect original
+	// model when both apply to the same request.
 	if assignment != nil {
 		log.ExperimentID = &assignment.ExperimentID
 		log.ExperimentArmID = &assignment.ArmID

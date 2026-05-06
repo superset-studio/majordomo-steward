@@ -105,10 +105,11 @@ func (l *LoggingConfig) EffectiveMaxResponseBodySize() int {
 }
 
 type PricingConfig struct {
-	RemoteURL       string        `mapstructure:"remote_url"`
-	RefreshInterval time.Duration `mapstructure:"refresh_interval"`
-	FallbackFile    string        `mapstructure:"fallback_file"`
-	AliasesFile     string        `mapstructure:"aliases_file"`
+	RemoteURL            string        `mapstructure:"remote_url"`
+	RefreshInterval      time.Duration `mapstructure:"refresh_interval"`
+	FallbackFile         string        `mapstructure:"fallback_file"`
+	AliasesFile          string        `mapstructure:"aliases_file"`
+	DeprecatedModelsFile string        `mapstructure:"deprecated_models_file"`
 }
 
 type ProvidersConfig struct {
@@ -170,6 +171,7 @@ func bindEnv(v *viper.Viper) {
 	v.BindEnv("pricing.refresh_interval", "PRICING_REFRESH_INTERVAL")
 	v.BindEnv("pricing.fallback_file", "PRICING_FALLBACK_FILE")
 	v.BindEnv("pricing.aliases_file", "PRICING_ALIASES_FILE")
+	v.BindEnv("pricing.deprecated_models_file", "DEPRECATED_MODELS_FILE")
 
 	v.BindEnv("providers.openai.base_url", "OPENAI_BASE_URL")
 	v.BindEnv("providers.anthropic.base_url", "ANTHROPIC_BASE_URL")
@@ -222,6 +224,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("pricing.refresh_interval", time.Hour)
 	v.SetDefault("pricing.fallback_file", "./pricing.json")
 	v.SetDefault("pricing.aliases_file", "./model_aliases.json")
+	v.SetDefault("pricing.deprecated_models_file", "./deprecated_models.json")
 
 	v.SetDefault("providers.openai.base_url", "https://api.openai.com")
 	v.SetDefault("providers.anthropic.base_url", "https://api.anthropic.com")
