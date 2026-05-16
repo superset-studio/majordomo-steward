@@ -14,13 +14,22 @@ import (
 	"github.com/superset-studio/majordomo-steward/internal/stewardclient"
 )
 
+// resultsReporterStore lets the ResultsReporter use both repositories as a
+// single store via embedded method promotion.
+type resultsReporterStore struct {
+	*repositories.ReplayRepository
+	*repositories.EvalRepository
+}
+
 // orgWorkers holds the background workers for a single registered org.
 type orgWorkers struct {
-	reporter       *stewardclient.Reporter
-	keysync        *stewardclient.KeySyncer
-	cloudSync      *stewardclient.CloudStorageSyncer
-	experimentSync *stewardclient.ExperimentSyncer
-	jobs           *stewardclient.JobPoller
+	reporter        *stewardclient.Reporter
+	resultsReporter *stewardclient.ResultsReporter
+	keysync         *stewardclient.KeySyncer
+	cloudSync       *stewardclient.CloudStorageSyncer
+	experimentSync  *stewardclient.ExperimentSyncer
+	providerKeySync *stewardclient.ProviderKeySyncer
+	jobs            *stewardclient.JobPoller
 }
 
 // WorkerManager manages per-org background workers (reporter, key-syncer, job-poller).
@@ -31,7 +40,10 @@ type WorkerManager struct {
 	store          *repositories.StewardRepository
 	cloudRepo      *repositories.CloudStorageRepository
 	experimentRepo *repositories.ExperimentRepository
-	proxy          *proxy.Handler
+	replayRepo      *repositories.ReplayRepository
+	evalRepo        *repositories.EvalRepository
+	providerKeyRepo *repositories.ProviderKeyRepository
+	proxy           *proxy.Handler
 	secrets        secrets.SecretStore
 
 	mu     sync.Mutex
@@ -45,6 +57,9 @@ func NewWorkerManager(
 	store *repositories.StewardRepository,
 	cloudRepo *repositories.CloudStorageRepository,
 	experimentRepo *repositories.ExperimentRepository,
+	replayRepo *repositories.ReplayRepository,
+	evalRepo *repositories.EvalRepository,
+	providerKeyRepo *repositories.ProviderKeyRepository,
 	proxyHandler *proxy.Handler,
 	secretStore secrets.SecretStore,
 ) *WorkerManager {
@@ -53,7 +68,10 @@ func NewWorkerManager(
 		store:          store,
 		cloudRepo:      cloudRepo,
 		experimentRepo: experimentRepo,
-		proxy:          proxyHandler,
+		replayRepo:      replayRepo,
+		evalRepo:        evalRepo,
+		providerKeyRepo: providerKeyRepo,
+		proxy:           proxyHandler,
 		secrets:        secretStore,
 		active:         make(map[uuid.UUID]*orgWorkers),
 	}
@@ -101,6 +119,9 @@ func (m *WorkerManager) StartOrg(orgID uuid.UUID, butlerURL, plaintextToken stri
 	reporter := stewardclient.NewReporter(orgCfg, m.store)
 	reporter.Start()
 
+	resultsReporter := stewardclient.NewResultsReporter(orgCfg, resultsReporterStore{m.replayRepo, m.evalRepo})
+	resultsReporter.Start()
+
 	keysync := stewardclient.NewKeySyncer(orgCfg, m.store)
 	keysync.Start()
 
@@ -110,16 +131,30 @@ func (m *WorkerManager) StartOrg(orgID uuid.UUID, butlerURL, plaintextToken stri
 	experimentSync := stewardclient.NewExperimentSyncer(orgCfg, m.experimentRepo)
 	experimentSync.Start()
 
-	exec := &jobExecutor{proxy: m.proxy, store: m.store}
+	providerKeySync := stewardclient.NewProviderKeySyncer(orgCfg, m.providerKeyRepo, m.secrets)
+	providerKeySync.Start()
+
+	replaySync := stewardclient.NewReplaySyncClient(orgCfg)
+	evalSync := stewardclient.NewEvalSyncClient(orgCfg)
+	exec := &jobExecutor{
+		proxy:      m.proxy,
+		store:      m.store,
+		replayRepo: m.replayRepo,
+		evalRepo:   m.evalRepo,
+		replaySync: replaySync,
+		evalSync:   evalSync,
+	}
 	jobs := stewardclient.NewJobPoller(orgCfg, exec)
 	jobs.Start()
 
 	m.active[orgID] = &orgWorkers{
-		reporter:       reporter,
-		keysync:        keysync,
-		cloudSync:      cloudSync,
-		experimentSync: experimentSync,
-		jobs:           jobs,
+		reporter:        reporter,
+		resultsReporter: resultsReporter,
+		keysync:         keysync,
+		cloudSync:       cloudSync,
+		experimentSync:  experimentSync,
+		providerKeySync: providerKeySync,
+		jobs:            jobs,
 	}
 
 	slog.Info("started workers for org", "org_id", orgID, "butler_url", butlerURL)
@@ -138,9 +173,11 @@ func (m *WorkerManager) StopOrg(ctx context.Context, orgID uuid.UUID) {
 	}
 
 	w.reporter.Stop()
+	w.resultsReporter.Stop()
 	w.keysync.Stop()
 	w.cloudSync.Stop()
 	w.experimentSync.Stop()
+	w.providerKeySync.Stop()
 	w.jobs.Stop()
 	delete(m.active, orgID)
 	slog.Info("stopped workers for org", "org_id", orgID)
@@ -153,9 +190,11 @@ func (m *WorkerManager) StopAll() {
 
 	for orgID, w := range m.active {
 		w.reporter.Stop()
+		w.resultsReporter.Stop()
 		w.keysync.Stop()
 		w.cloudSync.Stop()
 		w.experimentSync.Stop()
+		w.providerKeySync.Stop()
 		w.jobs.Stop()
 		slog.Info("stopped workers for org", "org_id", orgID)
 	}

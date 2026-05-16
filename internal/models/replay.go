@@ -69,6 +69,8 @@ type ReplayRun struct {
 	StartedAt   *time.Time `json:"startedAt,omitempty" db:"started_at"`
 	CompletedAt *time.Time `json:"completedAt,omitempty" db:"completed_at"`
 	CreatedAt   time.Time  `json:"createdAt" db:"created_at"`
+	UpdatedAt   time.Time  `json:"updatedAt" db:"updated_at"`
+	SyncedAt    *time.Time `json:"syncedAt,omitempty" db:"synced_at"`
 
 	// Parsed source_metadata for JSON response (not from DB)
 	SourceMetadataParsed map[string]string `json:"sourceMetadata,omitempty" db:"-"`
@@ -113,6 +115,7 @@ type ReplayResult struct {
 	JudgeEquivalent *bool   `json:"judgeEquivalent,omitempty" db:"judge_equivalent"`
 	JudgeReason     *string `json:"judgeReason,omitempty" db:"judge_reason"`
 
-	ErrorMessage *string   `json:"errorMessage,omitempty" db:"error_message"`
-	CreatedAt    time.Time `json:"createdAt" db:"created_at"`
+	ErrorMessage *string    `json:"errorMessage,omitempty" db:"error_message"`
+	CreatedAt    time.Time  `json:"createdAt" db:"created_at"`
+	SyncedAt     *time.Time `json:"syncedAt,omitempty" db:"synced_at"`
 }

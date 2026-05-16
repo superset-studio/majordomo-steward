@@ -25,19 +25,57 @@ import (
 	"github.com/superset-studio/majordomo-steward/internal/storage"
 )
 
-// jobExecutor wraps the proxy handler to satisfy the stewardclient.JobExecutor interface.
+// jobExecutor satisfies the stewardclient.JobExecutor interface. When Butler
+// dispatches a replay or eval job, the executor fetches the run spec and
+// persists it to the local DB so the co-located worker can claim and run it.
 type jobExecutor struct {
-	proxy *proxy.Handler
-	store *repositories.StewardRepository
+	proxy      *proxy.Handler
+	store      *repositories.StewardRepository
+	replayRepo *repositories.ReplayRepository
+	evalRepo   *repositories.EvalRepository
+	replaySync *stewardclient.ReplaySyncClient
+	evalSync   *stewardclient.EvalSyncClient
 }
 
 func (e *jobExecutor) ExecuteReplay(ctx context.Context, orgID, runID uuid.UUID) error {
-	slog.Warn("replay execution not yet implemented", "org_id", orgID, "run_id", runID)
+	run, err := e.replaySync.FetchReplayRun(ctx, runID)
+	if err != nil {
+		return fmt.Errorf("fetch replay run %s: %w", runID, err)
+	}
+	if run == nil {
+		return fmt.Errorf("replay run %s not found on butler", runID)
+	}
+
+	if err := e.replayRepo.UpsertReplayRun(ctx, run); err != nil {
+		return fmt.Errorf("upsert replay run %s: %w", runID, err)
+	}
+
+	slog.Info("replay run queued locally", "org_id", orgID, "run_id", runID)
 	return nil
 }
 
 func (e *jobExecutor) ExecuteEval(ctx context.Context, orgID, runID uuid.UUID) error {
-	slog.Warn("eval execution not yet implemented", "org_id", orgID, "run_id", runID)
+	bundle, err := e.evalSync.FetchEvalRun(ctx, runID)
+	if err != nil {
+		return fmt.Errorf("fetch eval run %s: %w", runID, err)
+	}
+	if bundle == nil {
+		return fmt.Errorf("eval run %s not found on butler", runID)
+	}
+
+	if err := e.evalRepo.UpsertEvalSet(ctx, bundle.EvalSet); err != nil {
+		return fmt.Errorf("upsert eval set %s: %w", bundle.EvalSet.ID, err)
+	}
+	for _, item := range bundle.Items {
+		if err := e.evalRepo.UpsertEvalSetItem(ctx, item); err != nil {
+			return fmt.Errorf("upsert eval set item %s: %w", item.ID, err)
+		}
+	}
+	if err := e.evalRepo.UpsertEvalRun(ctx, bundle.Run); err != nil {
+		return fmt.Errorf("upsert eval run %s: %w", runID, err)
+	}
+
+	slog.Info("eval run queued locally", "org_id", orgID, "run_id", runID, "items", len(bundle.Items))
 	return nil
 }
 
@@ -113,6 +151,9 @@ func Build(ctx context.Context, cfg *config.Config) (*Server, error) {
 	stewardRepo := repositories.NewStewardRepository(db)
 	cloudRepo := repositories.NewCloudStorageRepository(db)
 	experimentRepo := repositories.NewExperimentRepository(db)
+	replayRepo := repositories.NewReplayRepository(db)
+	evalRepo := repositories.NewEvalRepository(db)
+	providerKeyRepo := repositories.NewProviderKeyRepository(db)
 
 	// ── Request Log Writer ────────────────────────────────────────────────────
 	logWriter := requestlog.New(db, activeKeyCache, hllManager, claudeSessionRepo)
@@ -165,7 +206,7 @@ func Build(ctx context.Context, cfg *config.Config) (*Server, error) {
 	// ── Worker Manager (per-org background workers) ───────────────────────────
 	var workerMgr *WorkerManager
 	if proxySecretStore != nil {
-		workerMgr = NewWorkerManager(cfg, stewardRepo, cloudRepo, experimentRepo, proxyHandler, proxySecretStore)
+		workerMgr = NewWorkerManager(cfg, stewardRepo, cloudRepo, experimentRepo, replayRepo, evalRepo, providerKeyRepo, proxyHandler, proxySecretStore)
 		if err := workerMgr.LoadFromDB(ctx); err != nil {
 			logWriter.Close()
 			pricingSvc.Close()

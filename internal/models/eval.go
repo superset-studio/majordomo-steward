@@ -57,6 +57,8 @@ type EvalRun struct {
 	StartedAt   *time.Time `json:"startedAt,omitempty" db:"started_at"`
 	CompletedAt *time.Time `json:"completedAt,omitempty" db:"completed_at"`
 	CreatedAt   time.Time  `json:"createdAt" db:"created_at"`
+	UpdatedAt   time.Time  `json:"updatedAt" db:"updated_at"`
+	SyncedAt    *time.Time `json:"syncedAt,omitempty" db:"synced_at"`
 
 	// Parsed JSONB fields for JSON response (not from DB)
 	EvaluatorsParsed       []any `json:"evaluators" db:"-"`
@@ -112,8 +114,9 @@ type EvalResult struct {
 	ReplayInputTokens  *int     `json:"replayInputTokens,omitempty" db:"replay_input_tokens"`
 	ReplayOutputTokens *int     `json:"replayOutputTokens,omitempty" db:"replay_output_tokens"`
 
-	ErrorMessage *string   `json:"errorMessage,omitempty" db:"error_message"`
-	CreatedAt    time.Time `json:"createdAt" db:"created_at"`
+	ErrorMessage *string    `json:"errorMessage,omitempty" db:"error_message"`
+	CreatedAt    time.Time  `json:"createdAt" db:"created_at"`
+	SyncedAt     *time.Time `json:"syncedAt,omitempty" db:"synced_at"`
 
 	// Scores populated by secondary query (not from main SELECT)
 	Scores []EvalResultScore `json:"scores,omitempty" db:"-"`
@@ -124,7 +127,8 @@ type EvalResultScore struct {
 	ID            uuid.UUID `json:"id" db:"id"`
 	EvalResultID  uuid.UUID `json:"evalResultId" db:"eval_result_id"`
 	EvaluatorName string    `json:"evaluatorName" db:"evaluator_name"`
-	Score         float64   `json:"score" db:"score"`
-	Reason        *string   `json:"reason,omitempty" db:"reason"`
-	CreatedAt     time.Time `json:"createdAt" db:"created_at"`
+	Score         float64    `json:"score" db:"score"`
+	Reason        *string    `json:"reason,omitempty" db:"reason"`
+	CreatedAt     time.Time  `json:"createdAt" db:"created_at"`
+	SyncedAt      *time.Time `json:"syncedAt,omitempty" db:"synced_at"`
 }
