@@ -76,6 +76,11 @@ func detectFromPath(path string) ProviderInfo {
 		strings.Contains(path, "streamGenerateContent"):
 		return ProviderInfo{Provider: ProviderGemini, BaseURL: "https://generativelanguage.googleapis.com"}
 
+	case strings.HasPrefix(path, "/model/") &&
+		(strings.HasSuffix(path, "/converse") || strings.HasSuffix(path, "/converse-stream")):
+		// Bedrock base URL is region-specific and resolved from the Host header at request time.
+		return ProviderInfo{Provider: ProviderBedrock, BaseURL: ""}
+
 	default:
 		return ProviderInfo{Provider: ProviderUnknown, BaseURL: ""}
 	}
@@ -89,6 +94,8 @@ func GetParser(p Provider) ResponseParser {
 		return &AnthropicParser{}
 	case ProviderGemini:
 		return &GeminiParser{}
+	case ProviderBedrock:
+		return &BedrockParser{}
 	default:
 		return &OpenAIParser{}
 	}

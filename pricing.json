@@ -258,5 +258,97 @@
     "input_price_per_million": 0.0375,
     "output_price_per_million": 0.15,
     "cached_price_per_million": 0
+  },
+  "anthropic.claude-opus-4-7-v1:0": {
+    "input_price_per_million": 5,
+    "output_price_per_million": 25,
+    "cached_price_per_million": 0.5,
+    "cache_creation_price_per_million": 6.25
+  },
+  "anthropic.claude-sonnet-4-6-v1:0": {
+    "input_price_per_million": 3,
+    "output_price_per_million": 15,
+    "cached_price_per_million": 0.3,
+    "cache_creation_price_per_million": 3.75
+  },
+  "anthropic.claude-opus-4-6-v1:0": {
+    "input_price_per_million": 5,
+    "output_price_per_million": 25,
+    "cached_price_per_million": 0.5,
+    "cache_creation_price_per_million": 6.25
+  },
+  "anthropic.claude-opus-4-5-v1:0": {
+    "input_price_per_million": 5,
+    "output_price_per_million": 25,
+    "cached_price_per_million": 0.5,
+    "cache_creation_price_per_million": 6.25
+  },
+  "anthropic.claude-haiku-4-5-v1:0": {
+    "input_price_per_million": 1,
+    "output_price_per_million": 5,
+    "cached_price_per_million": 0.1,
+    "cache_creation_price_per_million": 1.25
+  },
+  "anthropic.claude-sonnet-4-5-v1:0": {
+    "input_price_per_million": 3,
+    "output_price_per_million": 15,
+    "cached_price_per_million": 0.3,
+    "cache_creation_price_per_million": 3.75
+  },
+  "anthropic.claude-sonnet-4-v1:0": {
+    "input_price_per_million": 3,
+    "output_price_per_million": 15,
+    "cached_price_per_million": 0.3,
+    "cache_creation_price_per_million": 3.75
+  },
+  "moonshotai.kimi-k2-thinking-v1:0": {
+    "input_price_per_million": 0.6,
+    "output_price_per_million": 2.5,
+    "cached_price_per_million": 0
+  },
+  "moonshotai.kimi-k2.5-v1:0": {
+    "input_price_per_million": 0.6,
+    "output_price_per_million": 3,
+    "cached_price_per_million": 0
+  },
+  "nvidia.nemotron-nano-2-v1:0": {
+    "input_price_per_million": 0.06,
+    "output_price_per_million": 0.23,
+    "cached_price_per_million": 0
+  },
+  "nvidia.nemotron-nano-2-vl-v1:0": {
+    "input_price_per_million": 0.2,
+    "output_price_per_million": 0.6,
+    "cached_price_per_million": 0
+  },
+  "nvidia.nemotron-3-nano-30b-a3b-v1:0": {
+    "input_price_per_million": 0.06,
+    "output_price_per_million": 0.24,
+    "cached_price_per_million": 0
+  },
+  "nvidia.nemotron-3-super-120b-a12b-v1:0": {
+    "input_price_per_million": 0.15,
+    "output_price_per_million": 0.65,
+    "cached_price_per_million": 0
+  },
+  "meta.llama4-maverick-17b-instruct-v1:0": {
+    "input_price_per_million": 0.24,
+    "output_price_per_million": 0.97,
+    "cached_price_per_million": 0
+  },
+  "meta.llama4-scout-17b-instruct-v1:0": {
+    "input_price_per_million": 0.17,
+    "output_price_per_million": 0.66,
+    "cached_price_per_million": 0
+  },
+  "deepseek.r1-v1:0": {
+    "input_price_per_million": 1.35,
+    "output_price_per_million": 5.4,
+    "cached_price_per_million": 0
+  },
+  "deepseek.v3-2-v1:0": {
+    "input_price_per_million": 0.62,
+    "output_price_per_million": 1.85,
+    "cached_price_per_million": 0
   }
 }

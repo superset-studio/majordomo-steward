@@ -133,8 +133,17 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	providerInfo := provider.Detect(r.URL.Path, headers)
 
 	if providerInfo.Provider == provider.ProviderUnknown {
-		httputil.WriteJSONError(w, http.StatusBadRequest, "unrecognized request path; supported paths: /v1/chat/completions, /v1/completions, /v1/embeddings, /v1/responses (OpenAI), /v1/messages (Anthropic), /<model>:generateContent (Gemini). Alternatively, set X-Majordomo-Provider header.")
+		httputil.WriteJSONError(w, http.StatusBadRequest, "unrecognized request path; supported paths: /v1/chat/completions, /v1/completions, /v1/embeddings, /v1/responses (OpenAI), /v1/messages (Anthropic), /<model>:generateContent (Gemini), /model/<modelId>/converse[-stream] (Bedrock). Alternatively, set X-Majordomo-Provider header.")
 		return
+	}
+
+	if providerInfo.Provider == provider.ProviderBedrock {
+		region, ok := parseBedrockRegionFromHost(r.Host)
+		if !ok {
+			httputil.WriteJSONError(w, http.StatusBadRequest, "Bedrock requests require a Host header of the form bedrock-runtime.<region>.amazonaws.com")
+			return
+		}
+		providerInfo.BaseURL = "https://bedrock-runtime." + region + ".amazonaws.com"
 	}
 
 	// Policy enforcement (synchronous, pre-proxy).
@@ -186,6 +195,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if h.deprecatedModels != nil {
 		parser := provider.GetParser(providerInfo.Provider)
 		requestedModel := parser.ExtractModel(body)
+		if providerInfo.Provider == provider.ProviderBedrock {
+			requestedModel = provider.ExtractBedrockModelFromPath(r.URL.Path)
+		}
 		if replacement, isDeprecated := h.deprecatedModels.Lookup(requestedModel); isDeprecated {
 			switch apiKeyInfo.DeprecatedModelBehavior {
 			case models.DeprecatedModelBehaviorRedirect, models.DeprecatedModelBehaviorWarn:
@@ -270,9 +282,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		isSSE := strings.Contains(streamResp.Headers.Get("Content-Type"), "text/event-stream")
+		contentType := streamResp.Headers.Get("Content-Type")
+		isSSE := strings.Contains(contentType, "text/event-stream")
+		isEventStream := strings.Contains(contentType, "vnd.amazon.eventstream")
 
-		if isSSE {
+		if isSSE || isEventStream {
 			// --- Streaming SSE path ---
 
 			// Disable the server's write deadline for this connection so
@@ -452,6 +466,9 @@ func (h *Handler) logRequest(
 	if metrics.Model == "" {
 		metrics.Model = parser.ExtractModel(reqBody)
 	}
+	if metrics.Model == "" && providerInfo.Provider == provider.ProviderBedrock {
+		metrics.Model = provider.ExtractBedrockModelFromPath(req.URL.Path)
+	}
 
 	metrics.ResponseTime = resp.ResponseTime
 
@@ -580,6 +597,30 @@ func (h *Handler) logRequest(
 			StatusCode:    resp.StatusCode,
 		})
 	}
+}
+
+// parseBedrockRegionFromHost extracts the AWS region from a Host header of the
+// form bedrock-runtime.<region>.amazonaws.com. The port suffix, if any, is
+// stripped. Returns (region, true) on a valid match; ("", false) otherwise.
+func parseBedrockRegionFromHost(host string) (string, bool) {
+	if i := strings.IndexByte(host, ':'); i >= 0 {
+		host = host[:i]
+	}
+	const prefix = "bedrock-runtime."
+	const suffix = ".amazonaws.com"
+	if !strings.HasPrefix(host, prefix) || !strings.HasSuffix(host, suffix) {
+		return "", false
+	}
+	region := host[len(prefix) : len(host)-len(suffix)]
+	if region == "" {
+		return "", false
+	}
+	for _, r := range region {
+		if !((r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-') {
+			return "", false
+		}
+	}
+	return region, true
 }
 
 // extractProviderKeyInfo extracts and hashes the provider API key from the Authorization header

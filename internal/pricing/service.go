@@ -13,9 +13,10 @@ import (
 )
 
 type ModelPricing struct {
-	InputPricePerMillion  float64
-	OutputPricePerMillion float64
-	CachedPricePerMillion float64
+	InputPricePerMillion         float64
+	OutputPricePerMillion        float64
+	CachedPricePerMillion        float64
+	CacheCreationPricePerMillion float64
 }
 
 type remotePricingResponse struct {
@@ -33,9 +34,10 @@ type remotePriceEntry struct {
 }
 
 type fallbackPriceEntry struct {
-	InputPricePerMillion  float64 `json:"input_price_per_million"`
-	OutputPricePerMillion float64 `json:"output_price_per_million"`
-	CachedPricePerMillion float64 `json:"cached_price_per_million"`
+	InputPricePerMillion         float64 `json:"input_price_per_million"`
+	OutputPricePerMillion        float64 `json:"output_price_per_million"`
+	CachedPricePerMillion        float64 `json:"cached_price_per_million"`
+	CacheCreationPricePerMillion float64 `json:"cache_creation_price_per_million"`
 }
 
 type Service struct {
@@ -168,9 +170,10 @@ func (s *Service) loadFallback() {
 	pricing := make(map[string]ModelPricing)
 	for model, entry := range fallbackData {
 		pricing[model] = ModelPricing{
-			InputPricePerMillion:  entry.InputPricePerMillion,
-			OutputPricePerMillion: entry.OutputPricePerMillion,
-			CachedPricePerMillion: entry.CachedPricePerMillion,
+			InputPricePerMillion:         entry.InputPricePerMillion,
+			OutputPricePerMillion:        entry.OutputPricePerMillion,
+			CachedPricePerMillion:        entry.CachedPricePerMillion,
+			CacheCreationPricePerMillion: entry.CacheCreationPricePerMillion,
 		}
 	}
 
@@ -197,9 +200,10 @@ func (s *Service) mergeFallback() {
 	for model, entry := range fallbackData {
 		if _, exists := s.pricing[model]; !exists {
 			s.pricing[model] = ModelPricing{
-				InputPricePerMillion:  entry.InputPricePerMillion,
-				OutputPricePerMillion: entry.OutputPricePerMillion,
-				CachedPricePerMillion: entry.CachedPricePerMillion,
+				InputPricePerMillion:         entry.InputPricePerMillion,
+				OutputPricePerMillion:        entry.OutputPricePerMillion,
+				CachedPricePerMillion:        entry.CachedPricePerMillion,
+				CacheCreationPricePerMillion: entry.CacheCreationPricePerMillion,
 			}
 			added++
 		}
@@ -245,14 +249,24 @@ func (s *Service) Calculate(metrics *models.UsageMetrics) models.Cost {
 		return models.Cost{ModelAliasFound: false}
 	}
 
-	inputCost := float64(metrics.InputTokens-metrics.CachedTokens) * pricing.InputPricePerMillion / 1_000_000
+	// When a cache-creation rate is configured, bill cache-creation tokens at that
+	// rate and remove them from the regular input bucket. Otherwise preserve the
+	// prior behavior of folding cache-creation tokens into the input bucket so
+	// existing pricing entries continue to produce the same totals.
+	nonCacheInput := metrics.InputTokens - metrics.CachedTokens
+	var cacheCreationCost float64
+	if pricing.CacheCreationPricePerMillion > 0 {
+		nonCacheInput -= metrics.CacheCreationTokens
+		cacheCreationCost = float64(metrics.CacheCreationTokens) * pricing.CacheCreationPricePerMillion / 1_000_000
+	}
+	inputCost := float64(nonCacheInput) * pricing.InputPricePerMillion / 1_000_000
 	cachedCost := float64(metrics.CachedTokens) * pricing.CachedPricePerMillion / 1_000_000
 	outputCost := float64(metrics.OutputTokens) * pricing.OutputPricePerMillion / 1_000_000
 
 	return models.Cost{
-		InputCost:       inputCost + cachedCost,
+		InputCost:       inputCost + cachedCost + cacheCreationCost,
 		OutputCost:      outputCost,
-		TotalCost:       inputCost + cachedCost + outputCost,
+		TotalCost:       inputCost + cachedCost + cacheCreationCost + outputCost,
 		ModelAliasFound: true,
 	}
 }
