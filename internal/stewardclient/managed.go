@@ -85,7 +85,7 @@ func (p *ManagedOrgPoller) run() {
 	// Poll immediately so newly-provisioned orgs are claimed without delay.
 	p.poll()
 
-	interval := p.intervals.JobPollInterval
+	interval := p.intervals.WorkTickInterval
 	if interval <= 0 {
 		interval = 30 * time.Second
 	}

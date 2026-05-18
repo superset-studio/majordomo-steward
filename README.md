@@ -47,8 +47,8 @@ Copy `.env.example` to `.env` and fill in the required values.
 | `STEWARD_ADMIN_TOKEN` | | Enables the admin API — required to use `majordomo steward` commands |
 | `BATCH_INTERVAL` | | How often to sync records to Butler (default: `60s`) |
 | `BATCH_MAX_SIZE` | | Max records per sync batch (default: `500`) |
-| `KEY_SYNC_INTERVAL` | | How often to pull API key updates from Butler (default: `5m`) |
-| `JOB_POLL_INTERVAL` | | How often to poll Butler for jobs (default: `30s`) |
+| `WORK_TICK_INTERVAL` | | How often to poll Butler for work (sync notifications + replay/eval jobs) via `GET /work` (default: `30s`) |
+| `WORK_TICK_LIMIT` | | Max jobs returned per `GET /work` (default: `25`) |
 | `LOG_LEVEL` | | `debug`, `info`, `warn`, `error` (default: `info`) |
 
 Generate the encryption key:

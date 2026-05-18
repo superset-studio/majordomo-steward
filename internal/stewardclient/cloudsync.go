@@ -1,7 +1,6 @@
 package stewardclient
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -10,13 +9,13 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
 	"github.com/superset-studio/majordomo-steward/internal/config"
 	"github.com/superset-studio/majordomo-steward/internal/models"
 	"github.com/superset-studio/majordomo-steward/internal/secrets"
 )
 
 // cloudStorageConfigPayload mirrors ingest.CloudStorageConfigRecord from Butler.
-// Defined here to avoid a cross-repo import dependency.
 type cloudStorageConfigPayload struct {
 	OwnerID   uuid.UUID `json:"owner_id"`
 	OwnerType string    `json:"owner_type"`
@@ -33,26 +32,22 @@ type cloudStorageConfigPayload struct {
 	GCSCredentialsJSON *string `json:"gcs_credentials_json,omitempty"`
 }
 
-// CloudStorageSyncStore is the minimal storage interface required by
-// CloudStorageSyncer.
+// CloudStorageSyncStore is the minimal storage interface required by CloudStorageSyncer.
 type CloudStorageSyncStore interface {
 	UpsertCloudStorageConfigs(ctx context.Context, records []models.CloudStorageRecord) error
 }
 
-// CloudStorageSyncer polls Butler for the org's cloud storage configs and
-// stores them locally so the proxy handler can look them up without calling
-// back to Butler on the hot path.
+// CloudStorageSyncer fetches the org's cloud storage configs from Butler and
+// stores them locally. Invoked by WorkTicker when a sync_cloud_storage job is
+// received.
 type CloudStorageSyncer struct {
 	cfg         config.StewardConfig
 	store       CloudStorageSyncStore
 	secretStore secrets.SecretStore
 	client      *http.Client
-	stopCh      chan struct{}
-	doneCh      chan struct{}
 }
 
-// NewCloudStorageSyncer creates a CloudStorageSyncer. Call Start() to begin
-// background syncing.
+// NewCloudStorageSyncer constructs a CloudStorageSyncer.
 func NewCloudStorageSyncer(
 	cfg config.StewardConfig,
 	store CloudStorageSyncStore,
@@ -63,65 +58,34 @@ func NewCloudStorageSyncer(
 		store:       store,
 		secretStore: secretStore,
 		client:      &http.Client{Timeout: 15 * time.Second},
-		stopCh:      make(chan struct{}),
-		doneCh:      make(chan struct{}),
 	}
 }
 
-// Start launches the background sync goroutine. Call Stop to shut it down.
-func (cs *CloudStorageSyncer) Start() {
-	go cs.run()
-}
-
-// Stop signals the syncer to exit and blocks until it does.
-func (cs *CloudStorageSyncer) Stop() {
-	close(cs.stopCh)
-	<-cs.doneCh
-}
-
-func (cs *CloudStorageSyncer) run() {
-	defer close(cs.doneCh)
-
-	// Sync immediately on startup so configs are available before requests arrive.
-	cs.sync()
-
-	ticker := time.NewTicker(cs.cfg.KeySyncInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			cs.sync()
-		case <-cs.stopCh:
-			return
-		}
-	}
-}
-
-func (cs *CloudStorageSyncer) sync() {
-	payloads, err := cs.fetch()
+// Sync fetches all cloud storage configs from Butler, re-encrypts credentials
+// with the local secret store, and upserts them. The passed logger should
+// already carry tick_id / org_id / job_id context.
+func (cs *CloudStorageSyncer) Sync(ctx context.Context, logger *slog.Logger) error {
+	payloads, err := cs.fetch(ctx)
 	if err != nil {
-		slog.Warn("cloud storage sync fetch failed", "error", err)
-		return
+		return fmt.Errorf("fetch: %w", err)
 	}
 
-	records, err := cs.encryptAndConvert(payloads)
+	records, err := cs.encryptAndConvert(logger, payloads)
 	if err != nil {
-		slog.Warn("cloud storage sync encrypt failed", "error", err)
-		return
+		return fmt.Errorf("encrypt: %w", err)
 	}
 
-	if err := cs.store.UpsertCloudStorageConfigs(context.Background(), records); err != nil {
-		slog.Warn("cloud storage sync store failed", "error", err)
-		return
+	if err := cs.store.UpsertCloudStorageConfigs(ctx, records); err != nil {
+		return fmt.Errorf("upsert %d configs: %w", len(records), err)
 	}
 
-	slog.Debug("cloud storage sync complete", "configs", len(records))
+	logger.Info("cloud storage sync applied", "configs", len(records))
+	return nil
 }
 
-func (cs *CloudStorageSyncer) fetch() ([]cloudStorageConfigPayload, error) {
+func (cs *CloudStorageSyncer) fetch(ctx context.Context) ([]cloudStorageConfigPayload, error) {
 	url := cs.cfg.ButlerBaseURL + "/api/v1/steward/cloud-storage-configs"
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, url, bytes.NewReader(nil))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
 	}
@@ -146,25 +110,25 @@ func (cs *CloudStorageSyncer) fetch() ([]cloudStorageConfigPayload, error) {
 
 // encryptAndConvert re-encrypts plaintext credentials from Butler using the
 // Steward's own secret store before persisting locally.
-func (cs *CloudStorageSyncer) encryptAndConvert(payloads []cloudStorageConfigPayload) ([]models.CloudStorageRecord, error) {
+func (cs *CloudStorageSyncer) encryptAndConvert(logger *slog.Logger, payloads []cloudStorageConfigPayload) ([]models.CloudStorageRecord, error) {
 	records := make([]models.CloudStorageRecord, 0, len(payloads))
 
 	for _, p := range payloads {
 		r := models.CloudStorageRecord{
-			OwnerID:   p.OwnerID,
-			OwnerType: p.OwnerType,
-			Provider:  p.Provider,
-			S3Bucket:  p.S3Bucket,
-			S3Region:  p.S3Region,
-			S3Endpoint: p.S3Endpoint,
-			GCSBucket:  p.GCSBucket,
+			OwnerID:      p.OwnerID,
+			OwnerType:    p.OwnerType,
+			Provider:     p.Provider,
+			S3Bucket:     p.S3Bucket,
+			S3Region:     p.S3Region,
+			S3Endpoint:   p.S3Endpoint,
+			GCSBucket:    p.GCSBucket,
 			GCSProjectID: p.GCSProjectID,
 		}
 
 		switch models.CloudStorageProviderType(p.Provider) {
 		case models.CloudStorageProviderGCS:
 			if p.GCSCredentialsJSON == nil {
-				slog.Warn("cloud storage sync: skipping GCS config with missing credentials",
+				logger.Warn("cloud storage sync: skipping GCS config with missing credentials",
 					"owner_id", p.OwnerID)
 				continue
 			}
@@ -176,7 +140,7 @@ func (cs *CloudStorageSyncer) encryptAndConvert(payloads []cloudStorageConfigPay
 
 		default: // s3
 			if p.S3AccessKeyID == nil || p.S3SecretAccessKey == nil {
-				slog.Warn("cloud storage sync: skipping S3 config with missing credentials",
+				logger.Warn("cloud storage sync: skipping S3 config with missing credentials",
 					"owner_id", p.OwnerID)
 				continue
 			}

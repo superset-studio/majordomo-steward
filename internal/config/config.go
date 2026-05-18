@@ -30,11 +30,10 @@ type StewardConfig struct {
 	OrgID         uuid.UUID `mapstructure:"-"`
 
 	// Global interval settings loaded from environment.
-	BatchInterval   time.Duration `mapstructure:"batch_interval"`
-	BatchMaxSize    int           `mapstructure:"batch_max_size"`
-	KeySyncInterval time.Duration `mapstructure:"key_sync_interval"`
-	JobPollInterval time.Duration `mapstructure:"job_poll_interval"`
-	JobPollLimit    int           `mapstructure:"job_poll_limit"`
+	BatchInterval    time.Duration `mapstructure:"batch_interval"`
+	BatchMaxSize     int           `mapstructure:"batch_max_size"`
+	WorkTickInterval time.Duration `mapstructure:"work_tick_interval"`
+	WorkTickLimit    int           `mapstructure:"work_tick_limit"`
 }
 
 // ManagedConfig holds settings for running as a Majordomo-hosted managed steward.
@@ -185,9 +184,8 @@ func bindEnv(v *viper.Viper) {
 
 	v.BindEnv("upstream.batch_interval", "BATCH_INTERVAL")
 	v.BindEnv("upstream.batch_max_size", "BATCH_MAX_SIZE")
-	v.BindEnv("upstream.key_sync_interval", "KEY_SYNC_INTERVAL")
-	v.BindEnv("upstream.job_poll_interval", "JOB_POLL_INTERVAL")
-	v.BindEnv("upstream.job_poll_limit", "JOB_POLL_LIMIT")
+	v.BindEnv("upstream.work_tick_interval", "WORK_TICK_INTERVAL")
+	v.BindEnv("upstream.work_tick_limit", "WORK_TICK_LIMIT")
 
 	v.BindEnv("managed.enabled", "MANAGED_ENABLED")
 	v.BindEnv("managed.master_token", "MANAGED_MASTER_TOKEN")
@@ -237,9 +235,8 @@ func setDefaults(v *viper.Viper) {
 
 	v.SetDefault("upstream.batch_interval", 60*time.Second)
 	v.SetDefault("upstream.batch_max_size", 500)
-	v.SetDefault("upstream.key_sync_interval", 5*time.Minute)
-	v.SetDefault("upstream.job_poll_interval", 30*time.Second)
-	v.SetDefault("upstream.job_poll_limit", 10)
+	v.SetDefault("upstream.work_tick_interval", 30*time.Second)
+	v.SetDefault("upstream.work_tick_limit", 25)
 
 	v.SetDefault("managed.enabled", false)
 	v.SetDefault("managed.master_token", "")

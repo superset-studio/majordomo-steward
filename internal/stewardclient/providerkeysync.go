@@ -1,7 +1,6 @@
 package stewardclient
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -17,7 +16,7 @@ import (
 )
 
 // providerKeyPayload mirrors Butler's ingest.ProviderKeyRecord wire format.
-// Key is plaintext on the wire; this Steward re-encrypts before persisting.
+// Key is plaintext on the wire; Steward re-encrypts before persisting.
 type providerKeyPayload struct {
 	ID        uuid.UUID  `json:"id"`
 	UserID    *uuid.UUID `json:"user_id,omitempty"`
@@ -29,94 +28,60 @@ type providerKeyPayload struct {
 }
 
 // ProviderKeySyncStore is the minimal storage interface required by the
-// provider key syncer. UpsertBatch persists already-locally-encrypted keys.
+// provider key syncer.
 type ProviderKeySyncStore interface {
 	UpsertBatch(ctx context.Context, keys []*models.ProviderAPIKey) error
 }
 
-// ProviderKeySyncer periodically polls Butler for all provider API keys
-// scoped to the steward's org, re-encrypts them with the Steward's local
-// secret store, and upserts into the local provider_api_keys table.
+// ProviderKeySyncer fetches all provider API keys for the steward's org from
+// Butler, re-encrypts them, and upserts them locally. Invoked by WorkTicker
+// when a sync_provider_keys job is received.
 type ProviderKeySyncer struct {
 	cfg         config.StewardConfig
 	store       ProviderKeySyncStore
 	secretStore secrets.SecretStore
 	client      *http.Client
-	stopCh      chan struct{}
-	doneCh      chan struct{}
 }
 
-// NewProviderKeySyncer creates a ProviderKeySyncer. Call Start() to begin polling.
+// NewProviderKeySyncer constructs a ProviderKeySyncer.
 func NewProviderKeySyncer(cfg config.StewardConfig, store ProviderKeySyncStore, secretStore secrets.SecretStore) *ProviderKeySyncer {
 	return &ProviderKeySyncer{
 		cfg:         cfg,
 		store:       store,
 		secretStore: secretStore,
 		client:      &http.Client{Timeout: 30 * time.Second},
-		stopCh:      make(chan struct{}),
-		doneCh:      make(chan struct{}),
 	}
 }
 
-// Start launches the background sync goroutine. It must be called once.
-func (ps *ProviderKeySyncer) Start() {
-	go ps.run()
-}
-
-// Stop signals the syncer to exit and waits for it to finish.
-func (ps *ProviderKeySyncer) Stop() {
-	close(ps.stopCh)
-	<-ps.doneCh
-}
-
-func (ps *ProviderKeySyncer) run() {
-	defer close(ps.doneCh)
-
-	// Sync immediately on startup so provider keys are available before the
-	// local worker tries to claim any runs.
-	ps.sync()
-
-	ticker := time.NewTicker(ps.cfg.KeySyncInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			ps.sync()
-		case <-ps.stopCh:
-			return
-		}
-	}
-}
-
-func (ps *ProviderKeySyncer) sync() {
-	payloads, err := ps.fetch()
+// Sync fetches provider keys from Butler and upserts them locally. The passed
+// logger should already carry tick_id / org_id / job_id context.
+func (ps *ProviderKeySyncer) Sync(ctx context.Context, logger *slog.Logger) error {
+	payloads, err := ps.fetch(ctx)
 	if err != nil {
-		slog.Warn("provider key sync fetch failed", "error", err)
-		return
+		return fmt.Errorf("fetch: %w", err)
 	}
 
-	records, err := ps.encryptAndConvert(payloads)
+	records, err := ps.encryptAndConvert(logger, payloads)
 	if err != nil {
-		slog.Warn("provider key sync encrypt failed", "error", err)
-		return
+		return fmt.Errorf("encrypt: %w", err)
 	}
 
 	if len(records) == 0 {
-		return
+		logger.Info("provider key sync: no records")
+		return nil
 	}
 
-	if err := ps.store.UpsertBatch(context.Background(), records); err != nil {
-		slog.Warn("provider key sync upsert failed", "error", err, "count", len(records))
-		return
+	if err := ps.store.UpsertBatch(ctx, records); err != nil {
+		return fmt.Errorf("upsert %d keys: %w", len(records), err)
 	}
 
-	slog.Debug("provider key sync complete", "upserted", len(records))
+	logger.Info("provider key sync applied", "upserted", len(records))
+	return nil
 }
 
-func (ps *ProviderKeySyncer) fetch() ([]providerKeyPayload, error) {
+func (ps *ProviderKeySyncer) fetch(ctx context.Context) ([]providerKeyPayload, error) {
 	url := ps.cfg.ButlerBaseURL + "/api/v1/steward/provider-keys"
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, url, bytes.NewReader(nil))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
 	}
@@ -139,13 +104,11 @@ func (ps *ProviderKeySyncer) fetch() ([]providerKeyPayload, error) {
 	return payloads, nil
 }
 
-// encryptAndConvert re-encrypts plaintext keys from Butler using the
-// Steward's own secret store before persisting locally.
-func (ps *ProviderKeySyncer) encryptAndConvert(payloads []providerKeyPayload) ([]*models.ProviderAPIKey, error) {
+func (ps *ProviderKeySyncer) encryptAndConvert(logger *slog.Logger, payloads []providerKeyPayload) ([]*models.ProviderAPIKey, error) {
 	records := make([]*models.ProviderAPIKey, 0, len(payloads))
 	for _, p := range payloads {
 		if p.Key == "" {
-			slog.Warn("provider key sync: skipping record with empty key",
+			logger.Warn("provider key sync: skipping record with empty key",
 				"key_id", p.ID, "provider", p.Provider)
 			continue
 		}
