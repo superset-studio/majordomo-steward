@@ -39,6 +39,12 @@
     "output_price_per_million": 22.5,
     "cached_price_per_million": 0.6
   },
+  "claude-opus-4-7": {
+    "input_price_per_million": 5,
+    "output_price_per_million": 25,
+    "cached_price_per_million": 0.5,
+    "cache_creation_price_per_million": 6.25
+  },
   "claude-opus-4-6": {
     "input_price_per_million": 5,
     "output_price_per_million": 25,
@@ -148,6 +154,11 @@
     "input_price_per_million": 1.75,
     "output_price_per_million": 14,
     "cached_price_per_million": 0.175
+  },
+  "gpt-5.5": {
+    "input_price_per_million": 5,
+    "output_price_per_million": 30,
+    "cached_price_per_million": 0.5
   },
   "gemini-1.5-flash": {
     "input_price_per_million": 0.075,
