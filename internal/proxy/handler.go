@@ -3,6 +3,7 @@ package proxy
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -130,10 +131,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	headers := extractHeaders(r.Header)
+	r.URL.Path = provider.NormalizeOpenAIPath(r.URL.Path)
 	providerInfo := provider.Detect(r.URL.Path, headers)
 
 	if providerInfo.Provider == provider.ProviderUnknown {
-		httputil.WriteJSONError(w, http.StatusBadRequest, "unrecognized request path; supported paths: /v1/chat/completions, /v1/completions, /v1/embeddings, /v1/responses (OpenAI), /v1/messages (Anthropic), /<model>:generateContent (Gemini), /model/<modelId>/converse[-stream] (Bedrock). Alternatively, set X-Majordomo-Provider header.")
+		httputil.WriteJSONError(w, http.StatusBadRequest, fmt.Sprintf("unrecognized request path %q (host %q); supported paths: /v1/chat/completions, /v1/completions, /v1/embeddings, /v1/responses (OpenAI; /v1 prefix optional), /v1/messages (Anthropic), /<model>:generateContent (Gemini), /model/<modelId>/converse[-stream] (Bedrock). Alternatively, set X-Majordomo-Provider header.", r.URL.Path, r.Host))
 		return
 	}
 

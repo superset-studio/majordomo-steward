@@ -189,3 +189,33 @@ func TestGetParser(t *testing.T) {
 		})
 	}
 }
+
+func TestNormalizeOpenAIPath(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"chat completions without v1", "/chat/completions", "/v1/chat/completions"},
+		{"responses without v1", "/responses", "/v1/responses"},
+		{"completions without v1", "/completions", "/v1/completions"},
+		{"embeddings without v1", "/embeddings", "/v1/embeddings"},
+		{"chat completions with v1 unchanged", "/v1/chat/completions", "/v1/chat/completions"},
+		{"responses with v1 unchanged", "/v1/responses", "/v1/responses"},
+		{"anthropic messages unchanged", "/v1/messages", "/v1/messages"},
+		{"gemini generateContent unchanged", "/v1beta/models/gemini-1.5-pro:generateContent", "/v1beta/models/gemini-1.5-pro:generateContent"},
+		{"bedrock converse unchanged", "/model/anthropic.claude-3-sonnet/converse", "/model/anthropic.claude-3-sonnet/converse"},
+		{"trailing subpath on responses rewritten", "/responses/abc", "/v1/responses/abc"},
+		{"unrelated path containing completions not rewritten", "/foo/completions", "/foo/completions"},
+		{"unrelated root path unchanged", "/healthz", "/healthz"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := NormalizeOpenAIPath(tt.in)
+			if got != tt.want {
+				t.Errorf("NormalizeOpenAIPath(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}

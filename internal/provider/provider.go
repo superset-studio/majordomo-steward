@@ -38,6 +38,23 @@ func Detect(path string, headers map[string]string) ProviderInfo {
 	return detectFromPath(path)
 }
 
+// NormalizeOpenAIPath rewrites OpenAI-compatible paths missing the /v1 prefix
+// to their canonical /v1/... form. The OpenAI SDK convention is that base_url
+// already includes the version segment (e.g. https://api.openai.com/v1), so
+// clients that point base_url at Steward without /v1 send paths like
+// /chat/completions or /responses. Normalizing once at the edge lets all
+// downstream detection, translation, and upstream forwarding logic assume the
+// canonical /v1/... shape. Returns the path unchanged for non-OpenAI-shaped
+// routes (Anthropic, Gemini, Bedrock).
+func NormalizeOpenAIPath(path string) string {
+	for _, suffix := range []string{"/chat/completions", "/completions", "/embeddings", "/responses"} {
+		if path == suffix || strings.HasPrefix(path, suffix+"/") {
+			return "/v1" + path
+		}
+	}
+	return path
+}
+
 func resolveExplicitProvider(name string) ProviderInfo {
 	switch Provider(strings.ToLower(name)) {
 	case ProviderOpenAI:
