@@ -361,5 +361,60 @@
     "input_price_per_million": 0.62,
     "output_price_per_million": 1.85,
     "cached_price_per_million": 0
+  },
+  "accounts/fireworks/models/deepseek-v4-pro": {
+    "input_price_per_million": 1.74,
+    "output_price_per_million": 3.48,
+    "cached_price_per_million": 0
+  },
+  "accounts/fireworks/models/kimi-k2p5": {
+    "input_price_per_million": 0.60,
+    "output_price_per_million": 3.00,
+    "cached_price_per_million": 0
+  },
+  "accounts/fireworks/models/kimi-k2p6": {
+    "input_price_per_million": 0.95,
+    "output_price_per_million": 4.00,
+    "cached_price_per_million": 0
+  },
+  "accounts/fireworks/models/glm-5p1": {
+    "input_price_per_million": 1.40,
+    "output_price_per_million": 4.40,
+    "cached_price_per_million": 0
+  },
+  "deepseek-ai/DeepSeek-V4-Pro": {
+    "input_price_per_million": 2.10,
+    "output_price_per_million": 4.40,
+    "cached_price_per_million": 0
+  },
+  "moonshotai/Kimi-K2.5": {
+    "input_price_per_million": 0.50,
+    "output_price_per_million": 2.80,
+    "cached_price_per_million": 0
+  },
+  "Qwen/Qwen3.6-Plus": {
+    "input_price_per_million": 0.50,
+    "output_price_per_million": 3.00,
+    "cached_price_per_million": 0
+  },
+  "Qwen/Qwen3.5-9B": {
+    "input_price_per_million": 0.10,
+    "output_price_per_million": 0.15,
+    "cached_price_per_million": 0
+  },
+  "Qwen/Qwen3-235B-A22B-fp8-tput": {
+    "input_price_per_million": 0.20,
+    "output_price_per_million": 0.60,
+    "cached_price_per_million": 0
+  },
+  "zai-org/GLM-5.1": {
+    "input_price_per_million": 1.40,
+    "output_price_per_million": 4.40,
+    "cached_price_per_million": 0
+  },
+  "zai-org/GLM-5": {
+    "input_price_per_million": 1.00,
+    "output_price_per_million": 3.20,
+    "cached_price_per_million": 0
   }
 }

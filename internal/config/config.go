@@ -115,6 +115,8 @@ type ProvidersConfig struct {
 	OpenAI    ProviderConfig `mapstructure:"openai"`
 	Anthropic ProviderConfig `mapstructure:"anthropic"`
 	Gemini    ProviderConfig `mapstructure:"gemini"`
+	Fireworks ProviderConfig `mapstructure:"fireworks"`
+	Together  ProviderConfig `mapstructure:"together"`
 }
 
 type ProviderConfig struct {
@@ -175,6 +177,8 @@ func bindEnv(v *viper.Viper) {
 	v.BindEnv("providers.openai.base_url", "OPENAI_BASE_URL")
 	v.BindEnv("providers.anthropic.base_url", "ANTHROPIC_BASE_URL")
 	v.BindEnv("providers.gemini.base_url", "GEMINI_BASE_URL")
+	v.BindEnv("providers.fireworks.base_url", "FIREWORKS_BASE_URL")
+	v.BindEnv("providers.together.base_url", "TOGETHER_BASE_URL")
 
 	v.BindEnv("metadata.hll_flush_interval", "METADATA_HLL_FLUSH_INTERVAL")
 	v.BindEnv("metadata.active_keys_cache_ttl", "METADATA_ACTIVE_KEYS_CACHE_TTL")
@@ -227,6 +231,8 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("providers.openai.base_url", "https://api.openai.com")
 	v.SetDefault("providers.anthropic.base_url", "https://api.anthropic.com")
 	v.SetDefault("providers.gemini.base_url", "https://generativelanguage.googleapis.com")
+	v.SetDefault("providers.fireworks.base_url", "https://api.fireworks.ai/inference/v1")
+	v.SetDefault("providers.together.base_url", "https://api.together.xyz/v1")
 
 	v.SetDefault("metadata.hll_flush_interval", 60*time.Second)
 	v.SetDefault("metadata.active_keys_cache_ttl", 5*time.Minute)

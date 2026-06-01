@@ -101,6 +101,24 @@ func TestProviderDetect(t *testing.T) {
 			wantProvider: ProviderGeminiOpenAI,
 		},
 		{
+			name:         "explicit fireworks header",
+			path:         "/v1/chat/completions",
+			headers:      map[string]string{"x-majordomo-provider": "fireworks"},
+			wantProvider: ProviderFireworks,
+		},
+		{
+			name:         "explicit together header",
+			path:         "/v1/chat/completions",
+			headers:      map[string]string{"x-majordomo-provider": "together"},
+			wantProvider: ProviderTogether,
+		},
+		{
+			name:         "explicit fireworks header case insensitive",
+			path:         "/v1/chat/completions",
+			headers:      map[string]string{"x-majordomo-provider": "FIREWORKS"},
+			wantProvider: ProviderFireworks,
+		},
+		{
 			name:         "chat completions path",
 			path:         "/v1/chat/completions",
 			headers:      map[string]string{},
@@ -176,6 +194,8 @@ func TestGetParser(t *testing.T) {
 		{ProviderGemini, "*provider.GeminiParser"},
 		{ProviderGeminiOpenAI, "*provider.OpenAIParser"}, // Gemini OpenAI-compat uses OpenAI parser
 		{ProviderAzure, "*provider.OpenAIParser"},        // Azure uses OpenAI parser
+		{ProviderFireworks, "*provider.OpenAIParser"},    // Fireworks is OpenAI-compatible
+		{ProviderTogether, "*provider.OpenAIParser"},     // Together is OpenAI-compatible
 		{ProviderUnknown, "*provider.OpenAIParser"},      // Unknown defaults to OpenAI
 	}
 

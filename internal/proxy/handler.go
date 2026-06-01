@@ -82,6 +82,8 @@ func NewHandler(
 		provider.ProviderOpenAI:    cfg.Providers.OpenAI.BaseURL,
 		provider.ProviderAnthropic: cfg.Providers.Anthropic.BaseURL,
 		provider.ProviderGemini:    cfg.Providers.Gemini.BaseURL,
+		provider.ProviderFireworks: cfg.Providers.Fireworks.BaseURL,
+		provider.ProviderTogether:  cfg.Providers.Together.BaseURL,
 	}
 
 	h := &Handler{

@@ -16,8 +16,10 @@ const (
 	ProviderGeminiOpenAI    Provider = "gemini-openai"    // Gemini via OpenAI-compatible endpoint
 	ProviderAnthropicOpenAI Provider = "anthropic-openai" // Anthropic via OpenAI-compatible translation
 	ProviderAzure           Provider = "azure"
-	ProviderBedrock      Provider = "bedrock"
-	ProviderUnknown      Provider = "unknown"
+	ProviderBedrock         Provider = "bedrock"
+	ProviderFireworks       Provider = "fireworks" // Fireworks AI; OpenAI-compatible
+	ProviderTogether        Provider = "together"  // Together AI; OpenAI-compatible
+	ProviderUnknown         Provider = "unknown"
 )
 
 type ResponseParser interface {
@@ -73,6 +75,10 @@ func resolveExplicitProvider(name string) ProviderInfo {
 		return ProviderInfo{Provider: ProviderAzure, BaseURL: ""}
 	case ProviderBedrock:
 		return ProviderInfo{Provider: ProviderBedrock, BaseURL: ""}
+	case ProviderFireworks:
+		return ProviderInfo{Provider: ProviderFireworks, BaseURL: "https://api.fireworks.ai/inference/v1"}
+	case ProviderTogether:
+		return ProviderInfo{Provider: ProviderTogether, BaseURL: "https://api.together.xyz/v1"}
 	default:
 		return ProviderInfo{Provider: ProviderUnknown, BaseURL: ""}
 	}
@@ -105,7 +111,8 @@ func detectFromPath(path string) ProviderInfo {
 
 func GetParser(p Provider) ResponseParser {
 	switch p {
-	case ProviderOpenAI, ProviderAzure, ProviderGeminiOpenAI, ProviderAnthropicOpenAI:
+	case ProviderOpenAI, ProviderAzure, ProviderGeminiOpenAI, ProviderAnthropicOpenAI,
+		ProviderFireworks, ProviderTogether:
 		return &OpenAIParser{}
 	case ProviderAnthropic:
 		return &AnthropicParser{}
