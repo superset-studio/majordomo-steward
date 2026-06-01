@@ -141,13 +141,19 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if providerInfo.Provider == provider.ProviderBedrock {
+	if providerInfo.Provider == provider.ProviderBedrock || providerInfo.Provider == provider.ProviderBedrockMantle {
 		region, ok := resolveBedrockRegion(r)
 		if !ok {
 			httputil.WriteJSONError(w, http.StatusBadRequest, "Bedrock requests require either an X-Majordomo-Bedrock-Region header or a Host header of the form bedrock-runtime.<region>.amazonaws.com")
 			return
 		}
-		providerInfo.BaseURL = "https://bedrock-runtime." + region + ".amazonaws.com"
+		if providerInfo.Provider == provider.ProviderBedrockMantle {
+			// Client sends bare /v1/messages; Mantle expects /anthropic/v1/messages.
+			// Carry the /anthropic prefix in the BaseURL so it concatenates with the request path.
+			providerInfo.BaseURL = "https://bedrock-mantle." + region + ".api.aws/anthropic"
+		} else {
+			providerInfo.BaseURL = "https://bedrock-runtime." + region + ".amazonaws.com"
+		}
 	}
 
 	// Policy enforcement (synchronous, pre-proxy).

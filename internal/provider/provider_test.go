@@ -119,6 +119,12 @@ func TestProviderDetect(t *testing.T) {
 			wantProvider: ProviderFireworks,
 		},
 		{
+			name:         "explicit bedrock-mantle header overrides anthropic path detection",
+			path:         "/v1/messages",
+			headers:      map[string]string{"x-majordomo-provider": "bedrock-mantle"},
+			wantProvider: ProviderBedrockMantle,
+		},
+		{
 			name:         "chat completions path",
 			path:         "/v1/chat/completions",
 			headers:      map[string]string{},
@@ -196,6 +202,7 @@ func TestGetParser(t *testing.T) {
 		{ProviderAzure, "*provider.OpenAIParser"},        // Azure uses OpenAI parser
 		{ProviderFireworks, "*provider.OpenAIParser"},    // Fireworks is OpenAI-compatible
 		{ProviderTogether, "*provider.OpenAIParser"},     // Together is OpenAI-compatible
+		{ProviderBedrockMantle, "*provider.AnthropicParser"}, // Bedrock Mantle speaks Anthropic Messages
 		{ProviderUnknown, "*provider.OpenAIParser"},      // Unknown defaults to OpenAI
 	}
 

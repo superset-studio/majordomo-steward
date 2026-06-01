@@ -416,5 +416,20 @@
     "input_price_per_million": 1.00,
     "output_price_per_million": 3.20,
     "cached_price_per_million": 0
+  },
+  "anthropic.claude-opus-4-8": {
+    "input_price_per_million": 5.00,
+    "output_price_per_million": 25.00,
+    "cached_price_per_million": 0
+  },
+  "anthropic.claude-opus-4-7": {
+    "input_price_per_million": 5.00,
+    "output_price_per_million": 25.00,
+    "cached_price_per_million": 0
+  },
+  "anthropic.claude-haiku-4-5": {
+    "input_price_per_million": 1.00,
+    "output_price_per_million": 5.00,
+    "cached_price_per_million": 0
   }
 }

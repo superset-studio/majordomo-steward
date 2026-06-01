@@ -17,8 +17,9 @@ const (
 	ProviderAnthropicOpenAI Provider = "anthropic-openai" // Anthropic via OpenAI-compatible translation
 	ProviderAzure           Provider = "azure"
 	ProviderBedrock         Provider = "bedrock"
-	ProviderFireworks       Provider = "fireworks" // Fireworks AI; OpenAI-compatible
-	ProviderTogether        Provider = "together"  // Together AI; OpenAI-compatible
+	ProviderFireworks       Provider = "fireworks"      // Fireworks AI; OpenAI-compatible
+	ProviderTogether        Provider = "together"       // Together AI; OpenAI-compatible
+	ProviderBedrockMantle   Provider = "bedrock-mantle" // AWS Bedrock Mantle; Anthropic Messages API
 	ProviderUnknown         Provider = "unknown"
 )
 
@@ -79,6 +80,10 @@ func resolveExplicitProvider(name string) ProviderInfo {
 		return ProviderInfo{Provider: ProviderFireworks, BaseURL: "https://api.fireworks.ai/inference/v1"}
 	case ProviderTogether:
 		return ProviderInfo{Provider: ProviderTogether, BaseURL: "https://api.together.xyz/v1"}
+	case ProviderBedrockMantle:
+		// Region-templated at request time; BaseURL is set by the handler after
+		// resolving the region from X-Majordomo-Bedrock-Region or Host.
+		return ProviderInfo{Provider: ProviderBedrockMantle, BaseURL: ""}
 	default:
 		return ProviderInfo{Provider: ProviderUnknown, BaseURL: ""}
 	}
@@ -114,7 +119,7 @@ func GetParser(p Provider) ResponseParser {
 	case ProviderOpenAI, ProviderAzure, ProviderGeminiOpenAI, ProviderAnthropicOpenAI,
 		ProviderFireworks, ProviderTogether:
 		return &OpenAIParser{}
-	case ProviderAnthropic:
+	case ProviderAnthropic, ProviderBedrockMantle:
 		return &AnthropicParser{}
 	case ProviderGemini:
 		return &GeminiParser{}
