@@ -142,9 +142,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if providerInfo.Provider == provider.ProviderBedrock {
-		region, ok := parseBedrockRegionFromHost(r.Host)
+		region, ok := resolveBedrockRegion(r)
 		if !ok {
-			httputil.WriteJSONError(w, http.StatusBadRequest, "Bedrock requests require a Host header of the form bedrock-runtime.<region>.amazonaws.com")
+			httputil.WriteJSONError(w, http.StatusBadRequest, "Bedrock requests require either an X-Majordomo-Bedrock-Region header or a Host header of the form bedrock-runtime.<region>.amazonaws.com")
 			return
 		}
 		providerInfo.BaseURL = "https://bedrock-runtime." + region + ".amazonaws.com"
@@ -603,6 +603,23 @@ func (h *Handler) logRequest(
 	}
 }
 
+// BedrockRegionHeader carries an explicit AWS region for Bedrock requests when
+// the Host header is unavailable (e.g. behind a fixed-Host ingress gateway).
+const BedrockRegionHeader = "X-Majordomo-Bedrock-Region"
+
+// resolveBedrockRegion determines the AWS region for a Bedrock request.
+// The X-Majordomo-Bedrock-Region header takes precedence; otherwise the region
+// is parsed from the Host header. Returns (region, true) on success.
+func resolveBedrockRegion(r *http.Request) (string, bool) {
+	if v := r.Header.Get(BedrockRegionHeader); v != "" {
+		if isValidAWSRegion(v) {
+			return v, true
+		}
+		return "", false
+	}
+	return parseBedrockRegionFromHost(r.Host)
+}
+
 // parseBedrockRegionFromHost extracts the AWS region from a Host header of the
 // form bedrock-runtime.<region>.amazonaws.com. The port suffix, if any, is
 // stripped. Returns (region, true) on a valid match; ("", false) otherwise.
@@ -616,15 +633,24 @@ func parseBedrockRegionFromHost(host string) (string, bool) {
 		return "", false
 	}
 	region := host[len(prefix) : len(host)-len(suffix)]
-	if region == "" {
+	if !isValidAWSRegion(region) {
 		return "", false
 	}
-	for _, r := range region {
+	return region, true
+}
+
+// isValidAWSRegion reports whether s is a syntactically valid AWS region
+// (non-empty, lowercase a-z / 0-9 / hyphen only).
+func isValidAWSRegion(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
 		if !((r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-') {
-			return "", false
+			return false
 		}
 	}
-	return region, true
+	return true
 }
 
 // extractProviderKeyInfo extracts and hashes the provider API key from the Authorization header

@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"net/http/httptest"
 	"testing"
 )
 
@@ -85,6 +86,73 @@ func TestExtractCustomMetadata(t *testing.T) {
 				} else if gotVal != expectedVal {
 					t.Errorf("key %q: expected %q, got %q", key, expectedVal, gotVal)
 				}
+			}
+		})
+	}
+}
+
+func TestResolveBedrockRegion(t *testing.T) {
+	tests := []struct {
+		name       string
+		host       string
+		headerVal  string
+		wantRegion string
+		wantOK     bool
+	}{
+		{
+			name:       "header takes precedence over host",
+			host:       "bedrock-runtime.us-east-1.amazonaws.com",
+			headerVal:  "eu-west-2",
+			wantRegion: "eu-west-2",
+			wantOK:     true,
+		},
+		{
+			name:       "header alone with arbitrary host",
+			host:       "gateway.gomajordomo.com",
+			headerVal:  "ap-southeast-1",
+			wantRegion: "ap-southeast-1",
+			wantOK:     true,
+		},
+		{
+			name:       "host fallback when header absent",
+			host:       "bedrock-runtime.us-west-2.amazonaws.com",
+			headerVal:  "",
+			wantRegion: "us-west-2",
+			wantOK:     true,
+		},
+		{
+			name:      "neither header nor valid host returns false",
+			host:      "gateway.gomajordomo.com",
+			headerVal: "",
+			wantOK:    false,
+		},
+		{
+			name:      "invalid header value rejected without falling back to host",
+			host:      "bedrock-runtime.us-east-1.amazonaws.com",
+			headerVal: "US-EAST-1",
+			wantOK:    false,
+		},
+		{
+			name:      "header with disallowed characters rejected",
+			host:      "bedrock-runtime.us-east-1.amazonaws.com",
+			headerVal: "us_east_1",
+			wantOK:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest("POST", "/model/foo/converse", nil)
+			req.Host = tt.host
+			if tt.headerVal != "" {
+				req.Header.Set(BedrockRegionHeader, tt.headerVal)
+			}
+			gotRegion, gotOK := resolveBedrockRegion(req)
+			if gotOK != tt.wantOK {
+				t.Fatalf("ok = %v, want %v", gotOK, tt.wantOK)
+			}
+			if gotOK && gotRegion != tt.wantRegion {
+				t.Errorf("region = %q, want %q", gotRegion, tt.wantRegion)
 			}
 		})
 	}
