@@ -39,11 +39,22 @@
     "output_price_per_million": 22.5,
     "cached_price_per_million": 0.6
   },
+  "claude-opus-4-8": {
+    "input_price_per_million": 5,
+    "output_price_per_million": 25,
+    "cached_price_per_million": 0.5,
+    "cache_creation_price_per_million": 6.25
+  },
   "claude-opus-4-7": {
     "input_price_per_million": 5,
     "output_price_per_million": 25,
     "cached_price_per_million": 0.5,
     "cache_creation_price_per_million": 6.25
+  },
+  "claude-haiku-4-5": {
+    "input_price_per_million": 1,
+    "output_price_per_million": 5,
+    "cached_price_per_million": 0.1
   },
   "claude-opus-4-6": {
     "input_price_per_million": 5,
@@ -430,6 +441,51 @@
   "anthropic.claude-haiku-4-5": {
     "input_price_per_million": 1.00,
     "output_price_per_million": 5.00,
+    "cached_price_per_million": 0
+  },
+  "moonshot.kimi-k2-thinking": {
+    "input_price_per_million": 0.60,
+    "output_price_per_million": 2.50,
+    "cached_price_per_million": 0
+  },
+  "moonshotai.kimi-k2.5": {
+    "input_price_per_million": 0.60,
+    "output_price_per_million": 3.00,
+    "cached_price_per_million": 0
+  },
+  "nvidia.nemotron-nano-12b-v2": {
+    "input_price_per_million": 0.06,
+    "output_price_per_million": 0.23,
+    "cached_price_per_million": 0
+  },
+  "nvidia.nemotron-nano-3-30b": {
+    "input_price_per_million": 0.06,
+    "output_price_per_million": 0.24,
+    "cached_price_per_million": 0
+  },
+  "nvidia.nemotron-super-3-120b": {
+    "input_price_per_million": 0.15,
+    "output_price_per_million": 0.65,
+    "cached_price_per_million": 0
+  },
+  "us.meta.llama4-maverick-17b-instruct-v1:0": {
+    "input_price_per_million": 0.24,
+    "output_price_per_million": 0.97,
+    "cached_price_per_million": 0
+  },
+  "us.meta.llama4-scout-17b-instruct-v1:0": {
+    "input_price_per_million": 0.17,
+    "output_price_per_million": 0.66,
+    "cached_price_per_million": 0
+  },
+  "us.deepseek.r1-v1:0": {
+    "input_price_per_million": 1.35,
+    "output_price_per_million": 5.40,
+    "cached_price_per_million": 0
+  },
+  "deepseek.v3.2": {
+    "input_price_per_million": 0.62,
+    "output_price_per_million": 1.85,
     "cached_price_per_million": 0
   }
 }
