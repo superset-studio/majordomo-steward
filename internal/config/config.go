@@ -231,8 +231,8 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("providers.openai.base_url", "https://api.openai.com")
 	v.SetDefault("providers.anthropic.base_url", "https://api.anthropic.com")
 	v.SetDefault("providers.gemini.base_url", "https://generativelanguage.googleapis.com")
-	v.SetDefault("providers.fireworks.base_url", "https://api.fireworks.ai/inference/v1")
-	v.SetDefault("providers.together.base_url", "https://api.together.xyz/v1")
+	v.SetDefault("providers.fireworks.base_url", "https://api.fireworks.ai/inference")
+	v.SetDefault("providers.together.base_url", "https://api.together.xyz")
 
 	v.SetDefault("metadata.hll_flush_interval", 60*time.Second)
 	v.SetDefault("metadata.active_keys_cache_ttl", 5*time.Minute)

@@ -77,9 +77,11 @@ func resolveExplicitProvider(name string) ProviderInfo {
 	case ProviderBedrock:
 		return ProviderInfo{Provider: ProviderBedrock, BaseURL: ""}
 	case ProviderFireworks:
-		return ProviderInfo{Provider: ProviderFireworks, BaseURL: "https://api.fireworks.ai/inference/v1"}
+		// BaseURL omits /v1 because NormalizeOpenAIPath adds it to the forwarded path.
+		return ProviderInfo{Provider: ProviderFireworks, BaseURL: "https://api.fireworks.ai/inference"}
 	case ProviderTogether:
-		return ProviderInfo{Provider: ProviderTogether, BaseURL: "https://api.together.xyz/v1"}
+		// BaseURL omits /v1 because NormalizeOpenAIPath adds it to the forwarded path.
+		return ProviderInfo{Provider: ProviderTogether, BaseURL: "https://api.together.xyz"}
 	case ProviderBedrockMantle:
 		// Region-templated at request time; BaseURL is set by the handler after
 		// resolving the region from X-Majordomo-Bedrock-Region or Host.
